@@ -2174,6 +2174,16 @@ static void tcg_out_qemu_st(TCGContext *s, const TCGArg *args, bool is64)
 #endif
 }
 
+static inline void tcg_out_fld(TCGContext *s, TCGArg a0)
+{
+    tcg_out_modrm_offset(s, 0xdb, 5, a0, 0);
+}
+
+static inline void tcg_out_fstp(TCGContext *s, TCGArg a0)
+{
+    tcg_out_modrm_offset(s, 0xdb, 7, a0, 0);
+}
+
 static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
                               const TCGArg args[TCG_MAX_OP_ARGS],
                               const int const_args[TCG_MAX_OP_ARGS])
@@ -2231,6 +2241,114 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
     case INDEX_op_goto_ptr:
         /* jmp to the given host address (could be epilogue) */
         tcg_out_modrm(s, OPC_GRP5, EXT5_JMPN_Ev, a0);
+        break;
+
+    /* FIXME: Exceptions, ctrl/sts, etc. Push to temps for perf,xplat. */
+
+    case INDEX_op_flds:
+        tcg_out_push(s, a1);
+        tcg_out8(s, 0xd9); tcg_out8(s, 0x04); tcg_out8(s, 0x24); /* fld dword [rsp] */
+        tcg_out_pop(s, a1);
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fldl:
+        tcg_out_push(s, a1);
+        tcg_out8(s, 0xdd); tcg_out8(s, 0x04); tcg_out8(s, 0x24); /* fld qword [rsp] */
+        tcg_out_pop(s, a1);
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fildl:
+        tcg_out_push(s, a1);
+        tcg_out8(s, 0xdb); tcg_out8(s, 0x04); tcg_out8(s, 0x24); /* fild dword [rsp] */
+        tcg_out_pop(s, a1);
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fildll:
+        tcg_out_push(s, a1);
+        tcg_out8(s, 0xdf); tcg_out8(s, 0x2c); tcg_out8(s, 0x24); /* fild qword [rsp] */
+        tcg_out_pop(s, a1);
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fsts:
+        tcg_out_fld(s, a1);
+        tcg_out_push(s, a0);
+        tcg_out8(s, 0xd9); tcg_out8(s, 0x1c); tcg_out8(s, 0x24); /* fstp dword [rsp] */
+        tcg_out_pop(s, a0);
+        break;
+    case INDEX_op_fstl:
+        tcg_out_fld(s, a1);
+        tcg_out_push(s, a0);
+        tcg_out8(s, 0xdd); tcg_out8(s, 0x1c); tcg_out8(s, 0x24); /* fstp qword [rsp] */
+        tcg_out_pop(s, a0);
+        break;
+    case INDEX_op_fistl:
+        tcg_out_fld(s, a1);
+        tcg_out_push(s, a0);
+        tcg_out8(s, 0xdb); tcg_out8(s, 0x1c); tcg_out8(s, 0x24); /* fistp dword [rsp] */
+        tcg_out_pop(s, a0);
+        break;
+    case INDEX_op_fistll:
+        tcg_out_fld(s, a1);
+        tcg_out_push(s, a0);
+        tcg_out8(s, 0xdf); tcg_out8(s, 0x3c); tcg_out8(s, 0x24); /* fistp qword [rsp] */
+        tcg_out_pop(s, a0);
+        break;
+    case INDEX_op_fmul:
+        tcg_out_fld(s, a1);
+        tcg_out_fld(s, a2);
+        tcg_out8(s, 0xde); tcg_out8(s, 0xc9); /* fmulp st(1),st */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fdiv:
+        tcg_out_fld(s, a1);
+        tcg_out_fld(s, a2);
+        tcg_out8(s, 0xde); tcg_out8(s, 0xf9); /* fdivp st(1),st */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fadd:
+        tcg_out_fld(s, a1);
+        tcg_out_fld(s, a2);
+        tcg_out8(s, 0xde); tcg_out8(s, 0xc1); /* fadd st(1),st */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fsub:
+        tcg_out_fld(s, a1);
+        tcg_out_fld(s, a2);
+        tcg_out8(s, 0xde); tcg_out8(s, 0xe9); /* fsub st(1),st */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fmov:
+        tcg_out_fld(s, a1);
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fxchg:
+        tcg_out_fld(s, a0);
+        tcg_out_fld(s, a1);
+        tcg_out_fstp(s, a0);
+        tcg_out_fstp(s, a1);
+        break;
+    case INDEX_op_fcom:
+        tcg_out_fld(s, a2);
+        tcg_out_fld(s, a1);
+        tcg_out8(s, 0xdf); tcg_out8(s, 0xf1); /* fcomip st,st(1) */
+        tcg_out8(s, 0xdd); tcg_out8(s, 0xd8); /* fstp st(0) */
+        tcg_out8(s, 0x9c); /* pushf */
+        tcg_out_pop(s, a0);
+        break;
+    case INDEX_op_fsqrt:
+        tcg_out_fld(s, a1);
+        tcg_out8(s, 0xd9); tcg_out8(s, 0xfa); /* fsqrt */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fsin:
+        tcg_out_fld(s, a1);
+        tcg_out8(s, 0xd9); tcg_out8(s, 0xfe); /* fsin */
+        tcg_out_fstp(s, a0);
+        break;
+    case INDEX_op_fcos:
+        tcg_out_fld(s, a1);
+        tcg_out8(s, 0xd9); tcg_out8(s, 0xff); /* fcos */
+        tcg_out_fstp(s, a0);
         break;
     case INDEX_op_br:
         tcg_out_jxx(s, JCC_JMP, arg_label(a0), 0);
@@ -2917,6 +3035,29 @@ static TCGConstraintSetIndex tcg_target_op_def(TCGOpcode op)
     switch (op) {
     case INDEX_op_goto_ptr:
         return C_O0_I1(r);
+
+    case INDEX_op_fmul:
+    case INDEX_op_fdiv:
+    case INDEX_op_fadd:
+    case INDEX_op_fsub:
+        return C_O0_I3(L, L, L);
+    case INDEX_op_flds:
+    case INDEX_op_fldl:
+    case INDEX_op_fildl:
+    case INDEX_op_fildll:
+    case INDEX_op_fmov:
+    case INDEX_op_fxchg:
+    case INDEX_op_fsqrt:
+    case INDEX_op_fcos:
+    case INDEX_op_fsin:
+        return C_O0_I2(L, L);
+    case INDEX_op_fcom:
+        return C_O1_I2(r, L, L);
+    case INDEX_op_fsts:
+    case INDEX_op_fstl:
+    case INDEX_op_fistl:
+    case INDEX_op_fistll:
+        return C_O1_I1(r, L);
 
     case INDEX_op_ld8u_i32:
     case INDEX_op_ld8u_i64:

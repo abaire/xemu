@@ -346,6 +346,96 @@ static inline void tcg_gen_discard_i32(TCGv_i32 arg)
     tcg_gen_op1_i32(INDEX_op_discard, arg);
 }
 
+static inline void tcg_gen_flds(TCGv_ptr dst, TCGv_i32 arg1)
+{
+    tcg_gen_op2(INDEX_op_flds, tcgv_ptr_arg(dst), tcgv_i32_arg(arg1));
+}
+
+static inline void tcg_gen_fldl(TCGv_ptr dst, TCGv_i64 arg1)
+{
+    tcg_gen_op2(INDEX_op_fldl, tcgv_ptr_arg(dst), tcgv_i64_arg(arg1));
+}
+
+static inline void tcg_gen_fildl(TCGv_ptr dst, TCGv_i32 arg1)
+{
+    tcg_gen_op2(INDEX_op_fildl, tcgv_ptr_arg(dst), tcgv_i32_arg(arg1));
+}
+
+static inline void tcg_gen_fildll(TCGv_ptr dst, TCGv_i64 arg1)
+{
+    tcg_gen_op2(INDEX_op_fildll, tcgv_ptr_arg(dst), tcgv_i64_arg(arg1));
+}
+
+static inline void tcg_gen_fsts(TCGv_i32 ret, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fsts, tcgv_i32_arg(ret), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fstl(TCGv_i64 ret, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fstl, tcgv_i64_arg(ret), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fistl(TCGv_i32 ret, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fistl, tcgv_i32_arg(ret), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fistll(TCGv_i64 ret, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fistll, tcgv_i64_arg(ret), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fmul(TCGv_ptr dst, TCGv_ptr arg1, TCGv_ptr arg2)
+{
+    tcg_gen_op3(INDEX_op_fmul, tcgv_ptr_arg(dst), tcgv_ptr_arg(arg1), tcgv_ptr_arg(arg2));
+}
+
+static inline void tcg_gen_fdiv(TCGv_ptr dst, TCGv_ptr arg1, TCGv_ptr arg2)
+{
+    tcg_gen_op3(INDEX_op_fdiv, tcgv_ptr_arg(dst), tcgv_ptr_arg(arg1), tcgv_ptr_arg(arg2));
+}
+
+static inline void tcg_gen_fadd(TCGv_ptr dst, TCGv_ptr arg1, TCGv_ptr arg2)
+{
+    tcg_gen_op3(INDEX_op_fadd, tcgv_ptr_arg(dst), tcgv_ptr_arg(arg1), tcgv_ptr_arg(arg2));
+}
+
+static inline void tcg_gen_fsub(TCGv_ptr dst, TCGv_ptr arg1, TCGv_ptr arg2)
+{
+    tcg_gen_op3(INDEX_op_fsub, tcgv_ptr_arg(dst), tcgv_ptr_arg(arg1), tcgv_ptr_arg(arg2));
+}
+
+static inline void tcg_gen_fmov(TCGv_ptr dst, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fmov, tcgv_ptr_arg(dst), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fxchg(TCGv_ptr dst, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fxchg, tcgv_ptr_arg(dst), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fcom(TCGv_i64 ret, TCGv_ptr arg1, TCGv_ptr arg2)
+{
+    tcg_gen_op3(INDEX_op_fcom, tcgv_i64_arg(ret), tcgv_ptr_arg(arg1), tcgv_ptr_arg(arg2));
+}
+
+static inline void tcg_gen_fsqrt(TCGv_ptr dst, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fsqrt, tcgv_ptr_arg(dst), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fcos(TCGv_ptr dst, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fcos, tcgv_ptr_arg(dst), tcgv_ptr_arg(src));
+}
+
+static inline void tcg_gen_fsin(TCGv_ptr dst, TCGv_ptr src)
+{
+    tcg_gen_op2(INDEX_op_fsin, tcgv_ptr_arg(dst), tcgv_ptr_arg(src));
+}
+
 static inline void tcg_gen_mov_i32(TCGv_i32 ret, TCGv_i32 arg)
 {
     if (ret != arg) {

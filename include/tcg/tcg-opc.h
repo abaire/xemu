@@ -213,6 +213,26 @@ DEF(qemu_st8_i32, 0, TLADDR_ARGS + 1, 1,
     TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS |
     IMPL(TCG_TARGET_HAS_qemu_st8_i32))
 
+/* Experimental host FPU support, primarily for x87 emulation */
+DEF(fadd, 0, 3, 0, 0)
+DEF(fcom, 1, 2, 0, 0)
+DEF(fcos, 0, 2, 0, 0)
+DEF(fdiv, 0, 3, 0, 0)
+DEF(fildl, 0, 2, 0, 0)
+DEF(fildll, 0, 2, 0, 0)
+DEF(fistl, 1, 1, 0, 0)
+DEF(fistll, 1, 1, 0, 0)
+DEF(fldl, 0, 2, 0, 0)
+DEF(flds, 0, 2, 0, 0)
+DEF(fmov, 0, 2, 0, 0)
+DEF(fmul, 0, 3, 0, 0)
+DEF(fsin, 0, 2, 0, 0)
+DEF(fsqrt, 0, 2, 0, 0)
+DEF(fstl, 1, 1, 0, 0)
+DEF(fsts, 1, 1, 0, 0)
+DEF(fsub, 0, 3, 0, 0)
+DEF(fxchg, 0, 2, 0, 0)
+
 /* Host vector support.  */
 
 #define IMPLVEC  TCG_OPF_VECTOR | IMPL(TCG_TARGET_MAYBE_vec)
