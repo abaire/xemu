@@ -59,6 +59,7 @@ void xemu_net_enable(void)
         qdict = qdict_new();
         qdict_put_str(qdict, "id",   id);
         qdict_put_str(qdict, "type", "user");
+        qdict_put_str(qdict, "hostfwd", "::1731-:731");
     } else if (g_config.net.backend == CONFIG_NET_BACKEND_UDP) {
         qdict = qdict_new();
         qdict_put_str(qdict, "id",        id);
