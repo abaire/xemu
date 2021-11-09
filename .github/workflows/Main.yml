@@ -234,18 +234,3 @@ jobs:
         publish_dir: ./archive
         publish_branch: ppa-snapshot
         force_orphan: true
-
-    © 2021 GitHub, Inc.
-    Terms
-    Privacy
-    Security
-    Status
-    Docs
-
-    Contact GitHub
-    Pricing
-    API
-    Training
-    Blog
-    About
-
