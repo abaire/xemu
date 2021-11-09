@@ -1,35 +1,3 @@
-
-Skip to content
-Pull requests
-Issues
-Marketplace
-Explore
-@Triticum0
-JohnGodgames /
-xemu
-Public
-forked from mborgerson/xemu
-
-0
-0
-
-    101
-
-Code
-Pull requests
-Actions
-Projects
-Security
-
-    Insights
-
-xemu/.github/workflows/main.yml
-@JohnGodgames
-JohnGodgames Update main.yml
-Latest commit fd7b3c3 3 days ago
-History
-1 contributor
-237 lines (230 sloc) 7.96 KB
 name: Build
 
 on:
