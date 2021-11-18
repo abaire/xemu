@@ -3030,12 +3030,12 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
         uint32_t clear_zstencil =
             d->pgraph.regs[NV_PGRAPH_ZSTENCILCLEARVALUE];
         GLint gl_clear_stencil;
-        GLfloat gl_clear_depth;
+        GLdouble gl_clear_depth;
 
         /* FIXME: Put these in some lookup table */
-        const float f16_max = 511.9375f;
+        const GLdouble f16_max = 511.9375f;
         /* FIXME: 7 bits of mantissa unused. maybe use full buffer? */
-        const float f24_max = 3.4027977E38;
+        const GLdouble f24_max = 3.4027977E38;
 
         switch(pg->surface_shape.zeta_format) {
         case NV097_SET_SURFACE_FORMAT_ZETA_Z16: {
@@ -3044,7 +3044,7 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
             if (pg->surface_shape.z_format) {
                 gl_clear_depth = convert_f16_to_float(z) / f16_max;
             } else {
-                gl_clear_depth = z / (float)0xFFFF;
+                gl_clear_depth = (GLdouble)z / 0xFFFF;
             }
             break;
         }
@@ -3052,10 +3052,9 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
             gl_clear_stencil = clear_zstencil & 0xFF;
             uint32_t z = clear_zstencil >> 8;
             if (pg->surface_shape.z_format) {
-                gl_clear_depth = convert_f24_to_float(z) / f24_max;
-                assert(false); /* FIXME: Untested */
+                gl_clear_depth = (GLdouble)convert_f24_to_float(z) / f24_max;
             } else {
-                gl_clear_depth = z / (float)0xFFFFFF;
+                gl_clear_depth = (GLdouble)z / 0xFFFFFF;
             }
             break;
         }
@@ -5332,9 +5331,9 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
             pg->surface_shape.z_format ? kelvin_surface_zeta_float_format_map :
                                          kelvin_surface_zeta_int_format_map;
         fmt = map[pg->surface_shape.zeta_format];
-        assert(!(pg->surface_shape.zeta_format ==
-                     NV097_SET_SURFACE_FORMAT_ZETA_Z24S8 &&
-                 pg->surface_shape.z_format)); /* FIXME */
+//        assert(!(pg->surface_shape.zeta_format ==
+//                     NV097_SET_SURFACE_FORMAT_ZETA_Z24S8 &&
+//                 pg->surface_shape.z_format)); /* FIXME */
     }
 
     DMAObject dma = nv_dma_load(d, dma_address);
