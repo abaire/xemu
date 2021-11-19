@@ -701,7 +701,7 @@ GLSL_DEFINE(texMat2, GLSL_C_MAT4(NV_IGRAPH_XF_XFCTX_T2MAT))
 GLSL_DEFINE(texMat3, GLSL_C_MAT4(NV_IGRAPH_XF_XFCTX_T3MAT))
 
 "\n"
-"vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
+"highp vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
 "vec4 oD0 = vec4(0.0,0.0,0.0,1.0);\n"
 "vec4 oD1 = vec4(0.0,0.0,0.0,1.0);\n"
 "vec4 oB0 = vec4(0.0,0.0,0.0,1.0);\n"

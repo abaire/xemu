@@ -3052,6 +3052,7 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
             gl_clear_stencil = clear_zstencil & 0xFF;
             uint32_t z = clear_zstencil >> 8;
             if (pg->surface_shape.z_format) {
+              glEnable(GL_DEPTH_CLAMP);
                 gl_clear_depth = (GLdouble)convert_f24_to_float(z) / f24_max;
             } else {
                 gl_clear_depth = (GLdouble)z / 0xFFFFFF;
@@ -3067,6 +3068,10 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
             gl_mask |= GL_DEPTH_BUFFER_BIT;
             glDepthMask(GL_TRUE);
             glClearDepth(gl_clear_depth);
+
+            double test;
+            glGetDoublev(GL_DEPTH_CLEAR_VALUE, &test);
+            printf("CLEAR DEPTH %g => %g\n", gl_clear_depth, test);
         }
         if (parameter & NV097_CLEAR_SURFACE_STENCIL) {
             gl_mask |= GL_STENCIL_BUFFER_BIT;
