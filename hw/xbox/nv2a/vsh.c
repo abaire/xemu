@@ -778,7 +778,7 @@ void vsh_translate(uint16_t version,
          * on OS X.
          */
         "  if (clipRange.y != clipRange.x) {\n"
-        "    oPos.z = (oPos.z - clipRange.x)/(0.5*(clipRange.y - clipRange.x)) - 1;\n"
+        "    oPos.z = (oPos.z - clipRange.x) / clipRange.y - 1.0;\n"
         "  }\n"
 
         /* Correct for the perspective divide */
