@@ -70,6 +70,10 @@ extern "C" {
 #undef atomic_fetch_sub
 }
 
+#ifdef ENABLE_NV2A_DEBUGGER
+#include "xemu-nv2a-debugger.h"
+#endif // ENABLE_NV2A_DEBUGGER
+
 ImFont *g_fixed_width_font;
 float g_main_menu_height;
 float g_ui_scale = 1.0;
@@ -789,7 +793,7 @@ public:
     }
 };
 
-static const char *get_os_platform(void) 
+static const char *get_os_platform(void)
 {
     const char *platform_name;
 
@@ -856,12 +860,12 @@ public:
         }
 
         static uint32_t time_start = 0;
-        if (ImGui::IsWindowAppearing()) { 
+        if (ImGui::IsWindowAppearing()) {
             const char *gl_shader_version = (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
             const char *gl_version = (const char*)glGetString(GL_VERSION);
             const char *gl_renderer = (const char*)glGetString(GL_RENDERER);
             const char *gl_vendor = (const char*)glGetString(GL_VENDOR);
-             
+
             snprintf(platform_info_text, sizeof(platform_info_text),
                 "CPU:          %s\nOS Platform:  %s\nOS Version:   %s\nManufacturer: %s\n"
                 "GPU Model:    %s\nDriver:       %s\nShader:       %s",
@@ -1795,6 +1799,9 @@ public:
 static MonitorWindow monitor_window;
 static DebugApuWindow apu_window;
 static DebugVideoWindow video_window;
+#ifdef ENABLE_NV2A_DEBUGGER
+static NV2ADebugger nv2a_debugger;
+#endif
 static InputWindow input_window;
 static NetworkWindow network_window;
 static AboutWindow about_window;
@@ -1941,6 +1948,26 @@ static bool is_key_pressed(int scancode)
     return io.KeysDown[scancode] && (io.KeysDownDuration[scancode] == 0.0);
 }
 
+static const char *nv2a_pgraph_enable = "nv2a_pgraph_*";
+static const char *nv2a_pgraph_disable = "-nv2a_pgraph_*";
+
+#if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
+static void nv2a_dbg_disable_trace_events_and_continue()
+{
+    trace_enable_events(nv2a_pgraph_disable);
+    nv2a_dbg_continue();
+    nv2a_dbg_on_frame_stepped = NULL;
+}
+
+static void nv2a_dbg_enable_trace_events_and_trigger_renderdoc()
+{
+    trace_enable_events(nv2a_pgraph_enable);
+    nv2a_dbg_renderdoc_capture_frames(1);
+    nv2a_dbg_step_frame();
+    nv2a_dbg_on_frame_stepped = nv2a_dbg_disable_trace_events_and_continue;
+}
+#endif
+
 static void process_keyboard_shortcuts(void)
 {
     if (is_shortcut_key_pressed(SDL_SCANCODE_E)) {
@@ -1967,9 +1994,22 @@ static void process_keyboard_shortcuts(void)
         monitor_window.toggle_open();
     }
 
+    if (is_key_pressed(SDL_SCANCODE_F9)) {
+        // TODO: Look up current state of nv2a traces and init this var.
+        static bool pgraph_trace_state = false;
+        pgraph_trace_state = !pgraph_trace_state;
+        trace_enable_events(
+            pgraph_trace_state ? nv2a_pgraph_enable : nv2a_pgraph_disable);
+    }
+
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
     if (is_key_pressed(SDL_SCANCODE_F10)) {
         nv2a_dbg_renderdoc_capture_frames(1);
+    }
+
+    if (is_key_pressed(SDL_SCANCODE_BACKSLASH)) {
+        nv2a_dbg_step_frame();
+        nv2a_dbg_on_frame_stepped = nv2a_dbg_enable_trace_events_and_trigger_renderdoc;
     }
 #endif
 }
@@ -2047,6 +2087,9 @@ static void ShowMainMenu()
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
             ImGui::MenuItem("Audio", NULL, &apu_window.is_open);
             ImGui::MenuItem("Video", NULL, &video_window.is_open);
+#ifdef ENABLE_NV2A_DEBUGGER
+            ImGui::MenuItem("nv2a Debugger", NULL, &nv2a_debugger.is_open);
+#endif
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
             if (nv2a_dbg_renderdoc_available()) {
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &capture_renderdoc_frame);
@@ -2373,6 +2416,9 @@ void xemu_hud_render(void)
     network_window.Draw();
     compatibility_reporter_window.Draw();
     notification_manager.Draw();
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_debugger.Draw(g_fixed_width_font, g_ui_scale, g_main_menu_height);
+#endif
 #if defined(_WIN32)
     update_window.Draw();
 #endif

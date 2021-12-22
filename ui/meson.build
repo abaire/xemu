@@ -50,6 +50,7 @@ xemu_ss.add(files(
   'xemu-settings.cc',
   'xemu-shaders.c',
   'xemu-hud.cc',
+  'xemu-nv2a-debugger.cc',
   'xemu-reporting.cc',
 ))
 
