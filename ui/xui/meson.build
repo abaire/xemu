@@ -10,6 +10,7 @@ xemu_ss.add(files(
   'main.cc',
   'menubar.cc',
   'monitor.cc',
+  'nv2a-debugger.cc',
   'notifications.cc',
   'popup-menu.cc',
   'reporting.cc',
