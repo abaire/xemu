@@ -45,6 +45,7 @@
 #include "notifications.hh"
 #include "monitor.hh"
 #include "debug.hh"
+#include "nv2a-debugger.hh"
 #include "welcome.hh"
 #include "menubar.hh"
 #include "compat.hh"
@@ -284,6 +285,9 @@ void xemu_hud_render(void)
     apu_window.Draw();
     video_window.Draw();
     compatibility_reporter_window.Draw();
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_debugger_window.Draw();
+#endif
 #if defined(_WIN32)
     update_window.Draw();
 #endif

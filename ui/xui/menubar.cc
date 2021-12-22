@@ -23,10 +23,15 @@
 #include "widgets.hh"
 #include "monitor.hh"
 #include "debug.hh"
+#include "nv2a-debugger.hh"
 #include "actions.hh"
 #include "compat.hh"
 #include "update.hh"
 #include "../xemu-os-utils.h"
+
+extern "C" {
+#include "trace/control.h"
+}
 
 extern float g_main_menu_height; // FIXME
 
@@ -38,6 +43,26 @@ bool g_capture_renderdoc_frame = false;
 #define SHORTCUT_MENU_TEXT(c) "Cmd+" #c
 #else
 #define SHORTCUT_MENU_TEXT(c) "Ctrl+" #c
+#endif
+
+static const char *nv2a_pgraph_enable = "nv2a_pgraph_*";
+static const char *nv2a_pgraph_disable = "-nv2a_pgraph_*";
+
+#if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
+static void nv2a_dbg_disable_trace_events_and_continue()
+{
+    trace_enable_events(nv2a_pgraph_disable);
+    nv2a_dbg_continue();
+    nv2a_dbg_on_frame_stepped = NULL;
+}
+
+static void nv2a_dbg_enable_trace_events_and_trigger_renderdoc()
+{
+    trace_enable_events(nv2a_pgraph_enable);
+    nv2a_dbg_renderdoc_capture_frames(1);
+    nv2a_dbg_step_frame();
+    nv2a_dbg_on_frame_stepped = nv2a_dbg_disable_trace_events_and_continue;
+}
 #endif
 
 void ProcessKeyboardShortcuts(void)
@@ -73,6 +98,11 @@ void ProcessKeyboardShortcuts(void)
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
     if (ImGui::IsKeyPressed(ImGuiKey_F10)) {
         nv2a_dbg_renderdoc_capture_frames(1);
+    }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Backslash)) {
+        nv2a_dbg_step_frame();
+        nv2a_dbg_on_frame_stepped = nv2a_dbg_enable_trace_events_and_trigger_renderdoc;
     }
 #endif
 }
@@ -165,6 +195,9 @@ void ShowMainMenu()
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
             ImGui::MenuItem("Audio", NULL, &apu_window.m_is_open);
             ImGui::MenuItem("Video", NULL, &video_window.m_is_open);
+#ifdef ENABLE_NV2A_DEBUGGER
+            ImGui::MenuItem("nv2a Debugger", NULL, &nv2a_debugger_window.is_open);
+#endif
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
             if (nv2a_dbg_renderdoc_available()) {
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &g_capture_renderdoc_frame);
