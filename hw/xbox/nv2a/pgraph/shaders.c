@@ -113,6 +113,13 @@ ShaderState pgraph_get_shader_state(PGRAPHState *pg)
     state.polygon_back_mode = (enum ShaderPolygonMode)GET_MASK(
         pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER), NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
 
+#ifdef ENABLE_NV2A_DEBUGGER
+    if (nv2a_dbg_should_force_wireframe()) {
+        state.polygon_front_mode = NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE;
+        state.polygon_back_mode = NV_PGRAPH_SETUPRASTER_FRONTFACEMODE_LINE;
+    }
+#endif
+
     state.smooth_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                     NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                            NV_PGRAPH_CONTROL_3_SHADEMODE_SMOOTH;

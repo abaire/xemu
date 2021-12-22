@@ -737,6 +737,12 @@ static TextureBinding* generate_texture(const TextureShape s,
     ret->addrv = 0xFFFFFFFF;
     ret->addrp = 0xFFFFFFFF;
     ret->border_color_set = false;
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_dbg_handle_generate_texture(ret->gl_texture, f.gl_internal_format,
+                                     s.width, s.height, f.gl_format, f.gl_type);
+#endif // ENABLE_NV2A_DEBUGGER
+
     return ret;
 }
 
@@ -748,6 +754,10 @@ static void texture_binding_destroy(gpointer data)
     if (binding->refcnt == 0) {
         glDeleteTextures(1, &binding->gl_texture);
         g_free(binding);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        nv2a_dbg_handle_delete_texture(binding->gl_texture);
+#endif // ENABLE_NV2A_DEBUGGER
     }
 }
 

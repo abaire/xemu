@@ -133,6 +133,12 @@ typedef struct NV2AStats {
         int counters[NV2A_PROF__COUNT];
     } frame_working, frame_history[NV2A_PROF_NUM_FRAMES];
     unsigned int frame_ptr;
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    const unsigned char *vram_ptr;
+    const unsigned char *ramin_ptr;
+    const unsigned int *pfifo_regs;
+#endif  // ENABLE_NV2A_DEBUGGER
 } NV2AStats;
 
 #ifdef __cplusplus

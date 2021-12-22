@@ -128,7 +128,7 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     if (r->zeta_binding) {
         r->zeta_binding->cleared = full_clear && write_zeta;
     }
-    
+
     pg->clearing = false;
 }
 
@@ -420,6 +420,31 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
     assert(r->shader_binding);
 
+#ifdef ENABLE_NV2A_DEBUGGER
+    NV2ADbgDrawInfo debug_info;
+
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                                          &debug_info.backbuffer_texture);
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        debug_info.texture_config[i].format.v =
+            pg->regs[NV_PGRAPH_TEXFMT0 + i * 4];
+        debug_info.texture_config[i].address.v =
+            pg->regs[NV_PGRAPH_TEXADDRESS0 + i * 4];
+        debug_info.texture_config[i].control0.v =
+            pg->regs[NV_PGRAPH_TEXCTL0_0 + i * 4];
+        debug_info.texture_config[i].control1.v =
+            pg->regs[NV_PGRAPH_TEXCTL1_0 + i * 4];
+        debug_info.texture_config[i].filter.v =
+            pg->regs[NV_PGRAPH_TEXFILTER0 + i * 4];
+        debug_info.texture_config[i].image_rect.v =
+            pg->regs[NV_PGRAPH_TEXIMAGERECT0 + i * 4];
+        debug_info.texture_config[i].border_color =
+            pg->regs[NV_PGRAPH_BORDERCOLOR0 + i * 4];
+    }
+#endif // ENABLE_NV2A_DEBUGGER
+
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
         nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
@@ -435,6 +460,15 @@ void pgraph_gl_flush_draw(NV2AState *d)
                           pg->draw_arrays_start,
                           pg->draw_arrays_count,
                           pg->draw_arrays_length);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_DRAW_ARRAYS;
+        debug_info.last_draw_num_items = 0;
+        for (int i = 0; i < pg->draw_arrays_length; ++i) {
+            debug_info.last_draw_num_items += pg->gl_draw_arrays_count[i];
+        }
+#endif // ENABLE_NV2A_DEBUGGER
+
     } else if (pg->inline_elements_length) {
         NV2A_GL_DPRINTF(false, "Inline Elements");
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
@@ -476,6 +510,12 @@ void pgraph_gl_flush_draw(NV2AState *d)
         glDrawElements(r->shader_binding->gl_primitive_mode,
                        pg->inline_elements_length, GL_UNSIGNED_INT,
                        (void *)0);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ELEMENTS;
+        debug_info.last_draw_num_items = pg->inline_elements_length;
+#endif // ENABLE_NV2A_DEBUGGER
+
     } else if (pg->inline_buffer_length) {
         NV2A_GL_DPRINTF(false, "Inline Buffer");
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
@@ -508,6 +548,12 @@ void pgraph_gl_flush_draw(NV2AState *d)
 
         glDrawArrays(r->shader_binding->gl_primitive_mode,
                      0, pg->inline_buffer_length);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_BUFFERS;
+        debug_info.last_draw_num_items = pg->inline_buffer_length;
+#endif // ENABLE_NV2A_DEBUGGER
+
     } else if (pg->inline_array_length) {
         NV2A_GL_DPRINTF(false, "Inline Array");
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
@@ -515,6 +561,12 @@ void pgraph_gl_flush_draw(NV2AState *d)
         unsigned int index_count = pgraph_gl_bind_inline_array(d);
         glDrawArrays(r->shader_binding->gl_primitive_mode,
                      0, index_count);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ARRAYS;
+        debug_info.last_draw_num_items = index_count;
+#endif // ENABLE_NV2A_DEBUGGER
+
     } else {
         NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");

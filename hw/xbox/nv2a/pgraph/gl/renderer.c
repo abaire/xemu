@@ -47,6 +47,10 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     gl_debug_initialize();
 #endif
 
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_dbg_initialize(d);
+#endif // ENABLE_NV2A_DEBUGGER
+
     /* DXT textures */
     assert(glo_check_extension("GL_EXT_texture_compression_s3tc"));
     /*  Internal RGB565 texture format */

@@ -247,6 +247,10 @@ typedef struct PGRAPHState {
         PGRAPHGLState *gl_renderer_state;
         PGRAPHVkState *vk_renderer_state;
     };
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    bool waiting_for_nv2a_debugger;
+#endif // ENABLE_NV2A_DEBUGGER
 } PGRAPHState;
 
 void pgraph_init(NV2AState *d);

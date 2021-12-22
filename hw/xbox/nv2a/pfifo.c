@@ -141,6 +141,11 @@ static bool pfifo_stall_for_flip(NV2AState *d)
 
 static bool pfifo_puller_should_stall(NV2AState *d)
 {
+#ifdef ENABLE_NV2A_DEBUGGER
+    if (qatomic_read(&d->pgraph.waiting_for_nv2a_debugger)) {
+        return true;
+    }
+#endif
     return pfifo_stall_for_flip(d) || qatomic_read(&d->pgraph.waiting_for_nop) ||
            qatomic_read(&d->pgraph.waiting_for_context_switch) ||
            !can_fifo_access(d);
@@ -507,7 +512,6 @@ static uint32_t ramht_hash(NV2AState *d, uint32_t handle)
 
     return hash;
 }
-
 
 static RAMHTEntry ramht_lookup(NV2AState *d, uint32_t handle)
 {

@@ -37,6 +37,10 @@ void nv2a_profile_increment(void)
         ts = now;
         frame_count = 0;
     }
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_dbg_handle_frame_swap();
+#endif
 }
 
 void nv2a_profile_flip_stall(void)
