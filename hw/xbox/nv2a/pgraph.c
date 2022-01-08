@@ -6603,6 +6603,54 @@ static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
     }
 }
 
+static void pgraph_update_inline_value(VertexAttribute *attr,
+                                       const uint8_t *data)
+{
+    if (attr->gl_type == GL_FLOAT) {
+        memcpy(attr->inline_value, data, attr->size * attr->count);
+        return;
+    }
+
+    if (attr->gl_type == GL_UNSIGNED_BYTE) {
+        assert(attr->gl_normalize && "Unexpected type UB unnormalized");
+        for (uint32_t i = 0; i < attr->count; ++i) {
+            attr->inline_value[i] = (float)data[i] / 255.0f;
+        }
+        return;
+    }
+
+    if (attr->gl_type == GL_SHORT) {
+        const int16_t *val = (const int16_t *)data;
+        if (attr->gl_normalize) {
+            for (uint32_t i = 0; i < attr->count; ++i, ++val) {
+                attr->inline_value[i] = MAX(-1.0f, (float)*val / 32767.0f);
+            }
+        } else {
+            for (uint32_t i = 0; i < attr->count; ++i, ++val) {
+                attr->inline_value[i] = (float)*val;
+            }
+        }
+        return;
+    }
+
+    if (attr->gl_type == GL_INT) {
+        assert(attr->needs_conversion && "Unexpected type: Int uncompressed");
+        assert(attr->count == 1 && "Expected only one compressed attr");
+
+        /* 3 signed, normalized components packed in 32-bits. (11,11,10) */
+        typedef struct {
+            signed int x : 11;
+            signed int y : 11;
+            signed int z : 10;
+        } CompressedComponents;
+
+        CompressedComponents val = *(const CompressedComponents *)data;
+        attr->inline_value[0] = MAX(-1.0f, (float)val.x / 1023.0f);
+        attr->inline_value[1] = MAX(-1.0f, (float)val.y / 1023.0f);
+        attr->inline_value[2] = MAX(-1.0f, (float)val.z / 511.0f);
+    }
+}
+
 static void pgraph_bind_vertex_attributes(NV2AState *d,
                                           unsigned int min_element,
                                           unsigned int max_element,
@@ -6685,11 +6733,11 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
         }
         if (stride) {
             last_entry += stride * provoking_element_index;
-            memcpy(attr->inline_value, last_entry, element_size);
+            pgraph_update_inline_value(attr, last_entry);
         } else {
             // Stride of 0 indicates that only the first element should be
             // used.
-            memcpy(attr->inline_value, last_entry, element_size);
+            pgraph_update_inline_value(attr, last_entry);
             glDisableVertexAttribArray(i);
             glVertexAttrib4fv(i, attr->inline_value);
             continue;
