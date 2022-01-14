@@ -5286,6 +5286,13 @@ static void pgraph_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     PGRAPHState *pg = &d->pgraph;
 
+    if (surface->shape.anti_aliasing != pg->surface_shape.anti_aliasing) {
+        NV2A_XPRINTF(DBG_SURFACE_SYNC,
+                     "Resolving antialiasing mismatch (surface aa=%d)",
+                     surface->shape.anti_aliasing);
+        pgraph_update_surface_part(d, true, surface->color);
+    }
+
     surface->upload_pending = false;
 
     // FIXME: Don't query GL for texture binding
