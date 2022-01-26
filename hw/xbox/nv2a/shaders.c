@@ -110,25 +110,37 @@ static MString* generate_geometry_shader(
         break;
     case PRIM_TYPE_TRIANGLE_STRIP:
         *gl_primitive_mode = GL_TRIANGLE_STRIP;
-        if (polygon_mode == POLY_MODE_FILL) { return NULL; }
-        assert(polygon_mode == POLY_MODE_LINE);
-        layout_in = "layout(triangles) in;\n";
-        layout_out = "layout(line_strip, max_vertices = 4) out;\n";
-        /* Imagine a quad made of a tristrip, the comments tell you which
-         * vertex we are using */
-        body = "  if ((gl_PrimitiveIDIn & 1) == 0) {\n"
-               "    if (gl_PrimitiveIDIn == 0) {\n"
-               "      emit_vertex(0);\n" /* bottom right */
-               "    }\n"
-               "    emit_vertex(1);\n" /* top right */
-               "    emit_vertex(2);\n" /* bottom left */
-               "    emit_vertex(0);\n" /* bottom right */
-               "  } else {\n"
-               "    emit_vertex(2);\n" /* bottom left */
-               "    emit_vertex(1);\n" /* top left */
-               "    emit_vertex(0);\n" /* top right */
-               "  }\n"
-               "  EndPrimitive();\n";
+        if (polygon_mode == POLY_MODE_FILL) {
+            layout_in = "layout(triangles) in;\n";
+            layout_out = "layout(triangle_strip, max_vertices = 3) out;\n";
+            body = "  if (gl_in[0].gl_Position.w >= 0.0 &&\n"
+                   "      gl_in[1].gl_Position.w >= 0.0 &&\n"
+                   "      gl_in[2].gl_Position.w >= 0.0) {\n"
+                   "    emit_vertex(0);\n"
+                   "    emit_vertex(1);\n"
+                   "    emit_vertex(2);\n"
+                   "    EndPrimitive();\n"
+                   "  }\n";
+        } else {
+            assert(polygon_mode == POLY_MODE_LINE);
+            layout_in = "layout(triangles) in;\n";
+            layout_out = "layout(line_strip, max_vertices = 4) out;\n";
+            /* Imagine a quad made of a tristrip, the comments tell you which
+             * vertex we are using */
+            body = "  if ((gl_PrimitiveIDIn & 1) == 0) {\n"
+                   "    if (gl_PrimitiveIDIn == 0) {\n"
+                   "      emit_vertex(0);\n" /* bottom right */
+                   "    }\n"
+                   "    emit_vertex(1);\n" /* top right */
+                   "    emit_vertex(2);\n" /* bottom left */
+                   "    emit_vertex(0);\n" /* bottom right */
+                   "  } else {\n"
+                   "    emit_vertex(2);\n" /* bottom left */
+                   "    emit_vertex(1);\n" /* top left */
+                   "    emit_vertex(0);\n" /* top right */
+                   "  }\n"
+                   "  EndPrimitive();\n";
+        }
         break;
     case PRIM_TYPE_TRIANGLE_FAN:
         *gl_primitive_mode = GL_TRIANGLE_FAN;
