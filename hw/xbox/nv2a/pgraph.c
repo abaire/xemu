@@ -6453,10 +6453,15 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
         }
         if (stride) {
             last_entry += stride * provoking_element_index;
+            memcpy(attr->inline_value, last_entry, element_size);
         } else {
-            last_entry += element_size * provoking_element_index;
+            // Stride of 0 indicates that only the first element should be
+            // used.
+            memcpy(attr->inline_value, last_entry, element_size);
+            glDisableVertexAttribArray(i);
+            glVertexAttrib4fv(i, attr->inline_value);
+            continue;
         }
-        memcpy(attr->inline_value, last_entry, element_size);
     }
 
     NV2A_GL_DGROUP_END();
