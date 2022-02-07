@@ -27,7 +27,7 @@
 #include <stdarg.h>
 #include <assert.h>
 
-#ifdef ENABLE_RENDERDOC
+#ifdef CONFIG_RENDERDOC
 #include <renderdoc_app.h>
 #include <dlfcn.h>
 
@@ -61,7 +61,7 @@ void gl_debug_initialize(void)
 #endif
     }
 
-#ifdef ENABLE_RENDERDOC
+#ifdef CONFIG_RENDERDOC
     void* renderdoc = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
     if (renderdoc) {
         pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(
@@ -147,7 +147,7 @@ void gl_debug_label(GLenum target, GLuint name, const char *fmt, ...)
 
 void gl_debug_frame_terminator(void)
 {
-#ifdef ENABLE_RENDERDOC
+#ifdef CONFIG_RENDERDOC
     if (rdoc_api) {
         if (rdoc_api->IsTargetControlConnected()) {
             if (rdoc_api->IsFrameCapturing()) {
@@ -166,6 +166,16 @@ void gl_debug_frame_terminator(void)
 
     glFrameTerminatorGREMEDY();
 }
+
+#ifdef CONFIG_RENDERDOC
+bool nv2a_dbg_renderdoc_available(void) {
+    return rdoc_api != NULL;
+}
+
+void nv2a_dbg_renderdoc_capture_frames(uint32_t num_frames) {
+    renderdoc_capture_frames = num_frames;
+}
+#endif // CONFIG_RENDERDOC
 
 #endif // DEBUG_NV2A_GL
 
@@ -217,6 +227,7 @@ void nv2a_dbg_initialize(struct NV2AState* device)
     g_debugger_state.device = device;
 
     memset(&g_nv2a_info, 0, sizeof(g_nv2a_info));
+
 }
 
 static void resume_vm(void)
@@ -433,11 +444,4 @@ void nv2a_dbg_invalidate_shader_cache(void)
     g_hash_table_remove_all(pg->shader_cache);
 }
 #endif // ENABLE_NV2A_DEBUGGER
-
-#ifdef ENABLE_RENDERDOC
-bool nv2a_dbg_renderdoc_available(void) {
-  return rdoc_api != NULL;
-void nv2a_dbg_renderdoc_capture_frames(uint32_t num_frames) {
-  renderdoc_capture_frames = num_frames;
-#endif // ENABLE_RENDERDOC
 
