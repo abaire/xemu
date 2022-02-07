@@ -61,6 +61,7 @@ extern "C" {
 #include "hw/xbox/nv2a/debug.h"
 #include "hw/xbox/nv2a/nv2a.h"
 #include "net/pcap.h"
+#include "trace/control.h"
 
 #undef typename
 #undef atomic_fetch_add
@@ -2068,6 +2069,16 @@ static void process_keyboard_shortcuts(void)
 
     if (is_key_pressed(SDL_SCANCODE_GRAVE)) {
         monitor_window.toggle_open();
+    }
+
+    if (is_key_pressed(SDL_SCANCODE_F9)) {
+        // TODO: Look up current state of nv2a traces and init this var.
+        static bool pgraph_trace_state = false;
+        pgraph_trace_state = !pgraph_trace_state;
+        static const char *nv2a_pgraph_enable = "nv2a_pgraph_*";
+        static const char *nv2a_pgraph_disable = "-nv2a_pgraph_*";
+        trace_enable_events(
+            pgraph_trace_state ? nv2a_pgraph_enable : nv2a_pgraph_disable);
     }
 
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
