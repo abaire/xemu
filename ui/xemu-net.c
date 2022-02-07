@@ -62,6 +62,7 @@ void xemu_net_enable(void)
         qdict = qdict_new();
         qdict_put_str(qdict, "id",   id);
         qdict_put_str(qdict, "type", "user");
+        qdict_put_str(qdict, "hostfwd", "::1731-:731");
     } else if (backend == XEMU_NET_BACKEND_SOCKET_UDP) {
         qdict = qdict_new();
         qdict_put_str(qdict, "id",        id);
