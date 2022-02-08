@@ -377,7 +377,7 @@ void nv2a_dbg_handle_delete_texture(GLuint texture)
         }
     }
 
-    printf("nv2a_dbg_handle_delete_texture: failed to delete texture info.\n");
+//    printf("nv2a_dbg_handle_delete_texture: failed to delete texture info.\n");
 }
 
 static NV2ADebuggerTextureState* find_texture_info(GLuint texture)

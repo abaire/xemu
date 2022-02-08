@@ -29,7 +29,7 @@
     } \
 } while (0)
 
-// #define DEBUG_NV2A
+ #define DEBUG_NV2A
 #ifdef DEBUG_NV2A
 # define NV2A_DPRINTF(format, ...)       printf("nv2a: " format, ## __VA_ARGS__)
 #else
@@ -37,9 +37,9 @@
 #endif
 
 // Enable debugger functionality within xemu.
-// #define ENABLE_NV2A_DEBUGGER
+ #define ENABLE_NV2A_DEBUGGER
 
-// #define DEBUG_NV2A_GL
+ #define DEBUG_NV2A_GL
 #ifdef DEBUG_NV2A_GL
 
 #include <stdbool.h>
