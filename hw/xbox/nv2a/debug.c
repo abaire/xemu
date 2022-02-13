@@ -227,7 +227,9 @@ void nv2a_dbg_initialize(struct NV2AState* device)
     g_debugger_state.device = device;
 
     memset(&g_nv2a_info, 0, sizeof(g_nv2a_info));
-
+    g_nv2a_stats.vram_ptr = device->vram_ptr;
+    g_nv2a_stats.ramin_ptr = device->ramin_ptr;
+    g_nv2a_stats.pfifo_regs = device->pfifo.regs;
 }
 
 static void resume_vm(void)
