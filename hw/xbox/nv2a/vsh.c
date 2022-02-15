@@ -799,7 +799,6 @@ void vsh_translate(uint16_t version,
     mstring_append(body,
         /* the shaders leave the result in screen space, while
          * opengl expects it in clip space.
-         * TODO: the pixel-center co-ordinate differences should handled
          */
         "  oPos.x = 2.0 * (oPos.x - surfaceSize.x * 0.5) / surfaceSize.x;\n"
         "  oPos.y = -2.0 * (oPos.y - surfaceSize.y * 0.5) / surfaceSize.y;\n"
@@ -807,6 +806,7 @@ void vsh_translate(uint16_t version,
     if (z_perspective) {
         mstring_append(body, "  oPos.z = oPos.w;\n");
     }
+
     mstring_append(body,
         /* Map the clip range into clip space so z is clipped correctly.
          * Note this makes the values in the depth buffer wrong. This should be
@@ -829,5 +829,10 @@ void vsh_translate(uint16_t version,
         "  }\n"
     );
 
+    /* Fix up the pixel-center difference between OpenGL and DirectX 8
+     * TODO: This still does not entirely match HW behavior.
+     * Pixels should be floored below 0.5 + 1/16 = 0.5625
+     */
+    mstring_append(body,
+        "  oPos.xy += (vec2(-1.0f, 1.0f) / glViewportSize.xy) * oPos.w;\n");
 }
-
