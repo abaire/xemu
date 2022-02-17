@@ -29,7 +29,7 @@
     } \
 } while (0)
 
- #define DEBUG_NV2A
+// #define DEBUG_NV2A
 #ifdef DEBUG_NV2A
 # define NV2A_DPRINTF(format, ...)       printf("nv2a: " format, ## __VA_ARGS__)
 #else
