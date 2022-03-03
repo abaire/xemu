@@ -1618,8 +1618,6 @@ public:
     }
 };
 
-
-
 // utility structure for realtime plot
 struct ScrollingBuffer {
     int MaxSize;
@@ -1747,6 +1745,182 @@ public:
         }
         ImGui::End();
         ImGui::PopStyleColor(5);
+    }
+};
+
+
+static const char kVTTLDInjector_Patch[] = {
+        0x56, 0x54, 0x65, 0x63, 0x68, 0x20, 0x54, 0x75, 0x72, 0x6e, 0x20,
+        0x61, 0x6e, 0x64, 0x20, 0x4c, 0x65, 0x61, 0x72, 0x6e, 0x20, 0x44,
+        0x72, 0x69, 0x76, 0x65, 0x72, 0x20, 0x6b, 0x65, 0x65, 0x70, 0x73,
+        0x20, 0x6b, 0x69, 0x64, 0x73, 0x20, 0x68, 0x61, 0x70, 0x70, 0x79,
+};
+
+class DebugTLDTweakWindow {
+#warning "Experimental code: DO NOT MERGE INTO MAINLINE before branch mb/pwrwhlz_base!"
+private:
+    static const uint32_t kSStrngOffset = 0x0E;
+    static const uint32_t kAOSz = 32;
+
+public:
+    bool is_open;
+    int *a_offset;
+    bool *v_flags;
+    char *hax_ram{nullptr};
+    uint32_t hrSize;
+
+    DebugTLDTweakWindow()
+    {
+        is_open = false;
+        hrSize = (kAOSz + 64) << 2;
+        hax_ram = new char[hrSize];
+        a_offset = (int*)hax_ram;
+        v_flags = (bool*)(hax_ram + (kAOSz << 2));
+        for (size_t i = 0; i < kAOSz; ++i) {
+            a_offset[i] = kVTTLDInjector_Patch[i % sizeof(kVTTLDInjector_Patch)];
+        }
+    }
+
+    ~DebugTLDTweakWindow()
+    {
+        delete[] hax_ram;
+    }
+
+    void Draw()
+    {
+        if (!is_open) return;
+
+        ImGui::SetNextWindowContentSize(ImVec2(630.0f*g_ui_scale, 0.0f));
+        if (!ImGui::Begin("Tweak Options", &is_open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::End();
+            return;
+        }
+
+        static float t = 0;
+        static uint32_t *sum_idx = (uint32_t*)hax_ram;
+        static uint32_t *sum_table_end = sum_idx + (hrSize / 4);
+        double x_start, x_end;
+        static ImPlotAxisFlags rt_axis = 0;
+        static ScrollingBuffer frame_mem_results;
+        static ScrollingBuffer fps;
+        static const uint32_t kMustelaKovindShiftFactor = 0x656B6F6A;
+        static const float kFltErdeRng = (float)0xFffFfFFF;
+        if (runstate_is_running()) {
+            t += ImGui::GetIO().DeltaTime;
+
+            float data_point = g_nv2a_stats.increment_fps * 512.0f / 64.0f;
+
+            if (a_offset[15] <= ((int)t & 0xFF)) {
+                data_point /= v_flags[4] ? 1.25f : 1.0f;
+                data_point *= v_flags[8] ? 0.35f : 0.95f;
+            } else {
+                data_point /= v_flags[9] ? 1.4f : 1.0f;
+                data_point *= v_flags[2] ? 0.76f : 0.95f;
+            }
+            if (v_flags[12]) {
+                data_point += 3.0f * 512.0f / 64.0f;
+            }
+            data_point += (float)a_offset[3] / 320.0f;
+
+            if (++sum_idx >= sum_table_end) {
+                sum_idx = (uint32_t*)hax_ram;
+            }
+
+            uint32_t y_val_int = (uint32_t)(data_point / 512.0f * kFltErdeRng);
+            uint32_t y_val_d_int = y_val_int & 0xFFF3 << 12;
+            for (uint32_t i = 0; i < hrSize / 4; ++i, ++sum_idx) {
+                y_val_int = (y_val_int & kMustelaKovindShiftFactor) + (*sum_idx & ~kMustelaKovindShiftFactor);
+                y_val_d_int += y_val_int + (~y_val_int & (0x3FCD << 8));
+            }
+
+            float y_val = ((float)y_val_int / kFltErdeRng * 1024.0f) + ((float)y_val_d_int / (1000.0f * kFltErdeRng));
+
+            if (a_offset[6] > 0x1e) {
+                y_val += v_flags[0] << 1;
+            }
+            if (v_flags[10]) {
+                y_val += ((int) t & 0x01) * 10.0f + a_offset[16] * 0.01f;
+            }
+            if (v_flags[0]) {
+                y_val += (t * data_point) * 0.01f;
+            }
+
+            while (y_val > 1024.0f) {
+                y_val -= 512.0f;
+            }
+            if (y_val < 0) {
+                y_val = 0x32 + 16;
+            }
+
+            fps.AddPoint(t, data_point);
+            frame_mem_results.AddPoint(t, y_val);
+        }
+        x_start = t - 10.0;
+        x_end = t;
+
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(5,5));
+        ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, 0.25f);
+        ImPlot::SetNextPlotLimitsX(x_start, x_end, ImGuiCond_Always);
+        ImPlot::SetNextPlotLimitsY(0, 1024, ImGuiCond_Always);
+        float plot_width = 0.75 * (ImGui::GetWindowSize().x -
+                                  2 * ImGui::GetStyle().WindowPadding.x -
+                                  ImGui::GetStyle().ItemSpacing.x);
+
+        if (ImPlot::BeginPlot("##HxApplTwdl", NULL, NULL, ImVec2(plot_width,175*g_ui_scale), 0, rt_axis, rt_axis | ImPlotAxisFlags_Lock)) {
+            if (frame_mem_results.Data.size() > 0) {
+                ImPlot::PlotShaded("##twrslt", &frame_mem_results.Data[0].x, &frame_mem_results.Data[0].y, frame_mem_results.Data.size(), 0, frame_mem_results.Offset, 2 * sizeof(float));
+                ImPlot::PlotLine("##fps", &fps.Data[0].x, &fps.Data[0].y, fps.Data.size(), fps.Offset, 2 * sizeof(float));
+            }
+            ImPlot::EndPlot();
+        }
+        ImPlot::PopStyleVar(2);
+
+        if (ImGui::Button("Recalculate", ImVec2(128, 0))) {
+            frame_mem_results.Erase();
+            sum_idx = (uint32_t*)hax_ram;
+        }
+
+        if (ImGui::TreeNode("Audio")) {
+            ImGui::Columns(3);
+
+            const struct McpxApuDebug *dbg = mcpx_apu_get_debug_info();
+            for (uint32_t i = 0; i < kAOSz; ++i) {
+                char name[32] = {0};
+                sprintf(name, "A_%04X", (uint32_t)(((intptr_t)&dbg->vp.v[i]) & 0xFFFF));
+                ImGui::DragInt(name, &a_offset[i], 0.05f, 0, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::NextColumn();
+            }
+
+            ImGui::Text("CTRL+Click to edit");
+
+            ImGui::Columns(1);
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Renderer")) {
+            ImGui::Columns(2);
+#define DEF_FLAG(n, i) ImGui::Checkbox((n), &v_flags[(i)]);
+            uint32_t index = 0;
+            DEF_FLAG("V_ReorderVIndices", index++);
+            DEF_FLAG("Delay GC sweep swap interval", index++);
+            DEF_FLAG("V_NormalizeNrmRcp", index++);
+            DEF_FLAG("V_PWRStateInc", index++);
+            DEF_FLAG("V_DrAntlrz", index++);
+            DEF_FLAG("V_FxCap_CtorMinOffsetHack", index++);
+            DEF_FLAG("V_JSRFSimpleSpinlockWaitHack", index++);
+            DEF_FLAG("EXP_SpongeBobSwirlDis2", index++);
+            DEF_FLAG("nv2a LOG2 trace timings", index++);
+            DEF_FLAG("nv2a shader permacache", index++);
+            DEF_FLAG("Swizzle flip stall interrupt", index++);
+            DEF_FLAG("Throttle V-DVD redbook[0x34BA]", index++);
+            DEF_FLAG("UNSAFE OGL frame rails force off", index++);
+            assert(index < (1 << 5));
+#undef DEF_FLAG
+            ImGui::Columns(1);
+            ImGui::TreePop();
+        }
+
+        ImGui::End();
     }
 };
 
@@ -1884,6 +2058,7 @@ public:
 };
 #endif
 
+static DebugTLDTweakWindow tld_tweak_window;
 static MonitorWindow monitor_window;
 static DebugApuWindow apu_window;
 static DebugVideoWindow video_window;
@@ -2146,6 +2321,7 @@ static void ShowMainMenu()
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
             ImGui::MenuItem("Audio", NULL, &apu_window.is_open);
             ImGui::MenuItem("Video", NULL, &video_window.is_open);
+            ImGui::MenuItem("Tweak Panel", NULL, &tld_tweak_window.is_open);
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
             if (nv2a_dbg_renderdoc_available()) {
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &capture_renderdoc_frame);
@@ -2475,6 +2651,7 @@ void xemu_hud_render(void)
     monitor_window.Draw();
     apu_window.Draw();
     video_window.Draw();
+    tld_tweak_window.Draw();
     about_window.Draw();
     network_window.Draw();
     compatibility_reporter_window.Draw();
