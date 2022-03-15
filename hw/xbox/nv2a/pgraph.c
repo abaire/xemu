@@ -6087,10 +6087,8 @@ static void pgraph_bind_textures(NV2AState *d)
         unsigned int rect_height =
             GET_MASK(pg->regs[NV_PGRAPH_TEXIMAGERECT0 + i*4],
                      NV_PGRAPH_TEXIMAGERECT0_HEIGHT);
-#ifdef DEBUG_NV2A
         unsigned int lod_bias =
             GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MIPMAP_LOD_BIAS);
-#endif
         unsigned int min_filter = GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MIN);
         unsigned int mag_filter = GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MAG);
 
@@ -6430,6 +6428,8 @@ static void pgraph_bind_textures(NV2AState *d)
             pgraph_texture_min_filter_map[min_filter]);
         glTexParameteri(binding->gl_target, GL_TEXTURE_MAG_FILTER,
             pgraph_texture_mag_filter_map[mag_filter]);
+        glTexParameteri(binding->gl_target, GL_TEXTURE_LOD_BIAS,
+            lod_bias);
 
         /* Texture wrapping */
         assert(addru < ARRAY_SIZE(pgraph_texture_addr_map));
@@ -6455,6 +6455,7 @@ static void pgraph_bind_textures(NV2AState *d)
                 (border_color & 0xFF) / 255.0f,         /* blue */
                 ((border_color >> 24) & 0xFF) / 255.0f  /* alpha */
             };
+
             glTexParameterfv(binding->gl_target, GL_TEXTURE_BORDER_COLOR,
                 gl_border_color);
         }
