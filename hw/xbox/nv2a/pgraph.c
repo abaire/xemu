@@ -1128,6 +1128,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         #define LAMP(i, mthd, prm) (LAM(i, mthd) && LAP(i, prm))
 
         if (method == NV097_DRAW_ARRAYS && (max_lookahead_words >= 7) &&
+            pg->inline_elements_length == 0 &&
             pg->draw_arrays_length <
                 (ARRAY_SIZE(pg->gl_draw_arrays_start) - 1) &&
             LAMP(0, NV097_SET_BEGIN_END, NV097_SET_BEGIN_END_OP_END) &&
@@ -2658,6 +2659,175 @@ DEF_METHOD_INC(NV097, SET_EYE_DIRECTION)
     pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_EYED] = true;
 }
 
+static void pgraph_flush_draw(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    assert(pg->shader_binding);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    NV2ADbgDrawInfo debug_info;
+
+    glGetFramebufferAttachmentParameteriv(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+        &debug_info.backbuffer_texture);
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        debug_info.texture_config[i].format.v = pg->regs[NV_PGRAPH_TEXFMT0 + i * 4];
+        debug_info.texture_config[i].address.v = pg->regs[NV_PGRAPH_TEXADDRESS0 + i * 4];
+        debug_info.texture_config[i].control0.v = pg->regs[NV_PGRAPH_TEXCTL0_0 + i * 4];
+        debug_info.texture_config[i].control1.v = pg->regs[NV_PGRAPH_TEXCTL1_0 + i * 4];
+        debug_info.texture_config[i].filter.v = pg->regs[NV_PGRAPH_TEXFILTER0 + i * 4];
+        debug_info.texture_config[i].image_rect.v = pg->regs[NV_PGRAPH_TEXIMAGERECT0 + i * 4];
+        debug_info.texture_config[i].border_color = pg->regs[NV_PGRAPH_BORDERCOLOR0 + i * 4];
+    }
+#endif
+
+    if (pg->draw_arrays_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
+
+        NV2A_GL_DPRINTF(false, "Draw Arrays");
+
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_array_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        pgraph_bind_vertex_attributes(d, pg->draw_arrays_min_start,
+                                      pg->draw_arrays_max_count - 1,
+                                      false, 0,
+                                      pg->draw_arrays_max_count - 1);
+        glMultiDrawArrays(pg->shader_binding->gl_primitive_mode,
+                          pg->gl_draw_arrays_start,
+                          pg->gl_draw_arrays_count,
+                          pg->draw_arrays_length);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_DRAW_ARRAYS;
+        debug_info.last_draw_num_items = 0;
+        for (int i = 0; i < pg->draw_arrays_length; ++i) {
+            debug_info.last_draw_num_items += pg->gl_draw_arrays_count[i];
+        }
+#endif
+    } else if (pg->inline_elements_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
+
+        NV2A_GL_DPRINTF(false, "Inline Elements");
+
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_array_length == 0);
+
+        uint32_t min_element = (uint32_t)-1;
+        uint32_t max_element = 0;
+        for (int i=0; i < pg->inline_elements_length; i++) {
+            max_element = MAX(pg->inline_elements[i], max_element);
+            min_element = MIN(pg->inline_elements[i], min_element);
+        }
+
+        pgraph_bind_vertex_attributes(
+                d, min_element, max_element, false, 0,
+                pg->inline_elements[pg->inline_elements_length - 1]);
+
+        VertexKey k;
+        memset(&k, 0, sizeof(VertexKey));
+        k.count = pg->inline_elements_length;
+        k.gl_type = GL_UNSIGNED_INT;
+        k.gl_normalize = GL_FALSE;
+        k.stride = sizeof(uint32_t);
+        uint64_t h = fast_hash((uint8_t*)pg->inline_elements,
+                               pg->inline_elements_length * 4);
+
+        LruNode *node = lru_lookup(&pg->element_cache, h, &k);
+        VertexLruNode *found = container_of(node, VertexLruNode, node);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, found->gl_buffer);
+        if (!found->initialized) {
+            nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                         pg->inline_elements_length * 4,
+                         pg->inline_elements, GL_STATIC_DRAW);
+            found->initialized = true;
+        } else {
+            nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4_NOTDIRTY);
+        }
+        glDrawElements(pg->shader_binding->gl_primitive_mode,
+                       pg->inline_elements_length, GL_UNSIGNED_INT,
+                       (void *)0);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ELEMENTS;
+        debug_info.last_draw_num_items = pg->inline_elements_length;
+#endif
+    } else if (pg->inline_buffer_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
+
+        NV2A_GL_DPRINTF(false, "Inline Buffer");
+
+        assert(pg->inline_array_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        if (pg->compressed_attrs) {
+            pg->compressed_attrs = 0;
+            pgraph_bind_shaders(pg);
+        }
+
+        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+            VertexAttribute *attr = &pg->vertex_attributes[i];
+            if (attr->inline_buffer_populated) {
+                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_3);
+                glBindBuffer(GL_ARRAY_BUFFER, attr->gl_inline_buffer);
+                glBufferData(GL_ARRAY_BUFFER,
+                             pg->inline_buffer_length * sizeof(float) * 4,
+                             attr->inline_buffer, GL_STREAM_DRAW);
+                glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glEnableVertexAttribArray(i);
+                attr->inline_buffer_populated = false;
+                memcpy(attr->inline_value,
+                       attr->inline_buffer + (pg->inline_buffer_length - 1) * 4,
+                       sizeof(attr->inline_value));
+            } else {
+                glDisableVertexAttribArray(i);
+                glVertexAttrib4fv(i, attr->inline_value);
+            }
+        }
+
+        glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                     0, pg->inline_buffer_length);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_BUFFERS;
+        debug_info.last_draw_num_items = pg->inline_buffer_length;
+#endif
+    } else if (pg->inline_array_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
+
+        NV2A_GL_DPRINTF(false, "Inline Array");
+
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        unsigned int index_count = pgraph_bind_inline_array(d);
+        glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                     0, index_count);
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ARRAYS;
+        debug_info.last_draw_num_items = index_count;
+#endif
+    } else {
+        NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
+        NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
+
+#ifdef ENABLE_NV2A_DEBUGGER
+        debug_info.last_draw_operation = NV2A_DRAW_TYPE_EMPTY;
+        debug_info.last_draw_num_items = 0;
+#endif
+    }
+
+#ifdef ENABLE_NV2A_DEBUGGER
+    nv2a_dbg_handle_begin_end(&debug_info);
+#endif
+}
+
 DEF_METHOD(NV097, SET_BEGIN_END)
 {
     bool depth_test =
@@ -2666,165 +2836,8 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         pg->regs[NV_PGRAPH_CONTROL_1] & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
 
     if (parameter == NV097_SET_BEGIN_END_OP_END) {
-#ifdef ENABLE_NV2A_DEBUGGER
-        NV2ADbgDrawInfo debug_info;
-
-        glGetFramebufferAttachmentParameteriv(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT0,
-            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
-            &debug_info.backbuffer_texture);
-
-        for (uint32_t i = 0; i < 4; ++i) {
-            debug_info.texture_config[i].format.v = pg->regs[NV_PGRAPH_TEXFMT0 + i * 4];
-            debug_info.texture_config[i].address.v = pg->regs[NV_PGRAPH_TEXADDRESS0 + i * 4];
-            debug_info.texture_config[i].control0.v = pg->regs[NV_PGRAPH_TEXCTL0_0 + i * 4];
-            debug_info.texture_config[i].control1.v = pg->regs[NV_PGRAPH_TEXCTL1_0 + i * 4];
-            debug_info.texture_config[i].filter.v = pg->regs[NV_PGRAPH_TEXFILTER0 + i * 4];
-            debug_info.texture_config[i].image_rect.v = pg->regs[NV_PGRAPH_TEXIMAGERECT0 + i * 4];
-            debug_info.texture_config[i].border_color = pg->regs[NV_PGRAPH_BORDERCOLOR0 + i * 4];
-        }
-#endif
         nv2a_profile_inc_counter(NV2A_PROF_BEGIN_ENDS);
-
-        assert(pg->shader_binding);
-
-        if (pg->draw_arrays_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
-
-            NV2A_GL_DPRINTF(false, "Draw Arrays");
-
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_array_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            pgraph_bind_vertex_attributes(d, pg->draw_arrays_min_start,
-                                          pg->draw_arrays_max_count - 1,
-                                          false, 0,
-                                          pg->draw_arrays_max_count - 1);
-            glMultiDrawArrays(pg->shader_binding->gl_primitive_mode,
-                              pg->gl_draw_arrays_start,
-                              pg->gl_draw_arrays_count,
-                              pg->draw_arrays_length);
-#ifdef ENABLE_NV2A_DEBUGGER
-            debug_info.last_draw_operation = NV2A_DRAW_TYPE_DRAW_ARRAYS;
-            debug_info.last_draw_num_items = 0;
-            for (int i = 0; i < pg->draw_arrays_length; ++i) {
-                debug_info.last_draw_num_items += pg->gl_draw_arrays_count[i];
-            }
-#endif
-        } else if (pg->inline_buffer_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
-
-            NV2A_GL_DPRINTF(false, "Inline Buffer");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_array_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            if (pg->compressed_attrs) {
-                pg->compressed_attrs = 0;
-                pgraph_bind_shaders(pg);
-            }
-
-            for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
-                VertexAttribute *attr = &pg->vertex_attributes[i];
-                if (attr->inline_buffer_populated) {
-                    nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_3);
-                    glBindBuffer(GL_ARRAY_BUFFER, attr->gl_inline_buffer);
-                    glBufferData(GL_ARRAY_BUFFER,
-                                 pg->inline_buffer_length * sizeof(float) * 4,
-                                 attr->inline_buffer, GL_STREAM_DRAW);
-                    glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                    glEnableVertexAttribArray(i);
-                    attr->inline_buffer_populated = false;
-                    memcpy(attr->inline_value,
-                           attr->inline_buffer + (pg->inline_buffer_length - 1) * 4,
-                           sizeof(attr->inline_value));
-                } else {
-                    glDisableVertexAttribArray(i);
-                    glVertexAttrib4fv(i, attr->inline_value);
-                }
-            }
-
-            glDrawArrays(pg->shader_binding->gl_primitive_mode,
-                         0, pg->inline_buffer_length);
-#ifdef ENABLE_NV2A_DEBUGGER
-            debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_BUFFERS;
-            debug_info.last_draw_num_items = pg->inline_buffer_length;
-#endif
-        } else if (pg->inline_array_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
-
-            NV2A_GL_DPRINTF(false, "Inline Array");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            unsigned int index_count = pgraph_bind_inline_array(d);
-            glDrawArrays(pg->shader_binding->gl_primitive_mode,
-                         0, index_count);
-#ifdef ENABLE_NV2A_DEBUGGER
-            debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ARRAYS;
-            debug_info.last_draw_num_items = index_count;
-#endif
-        } else if (pg->inline_elements_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
-
-            NV2A_GL_DPRINTF(false, "Inline Elements");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_array_length == 0);
-
-            uint32_t min_element = (uint32_t)-1;
-            uint32_t max_element = 0;
-            for (int i=0; i < pg->inline_elements_length; i++) {
-                max_element = MAX(pg->inline_elements[i], max_element);
-                min_element = MIN(pg->inline_elements[i], min_element);
-            }
-
-            pgraph_bind_vertex_attributes(
-                d, min_element, max_element, false, 0,
-                pg->inline_elements[pg->inline_elements_length - 1]);
-
-            VertexKey k;
-            memset(&k, 0, sizeof(VertexKey));
-            k.count = pg->inline_elements_length;
-            k.gl_type = GL_UNSIGNED_INT;
-            k.gl_normalize = GL_FALSE;
-            k.stride = sizeof(uint32_t);
-            uint64_t h = fast_hash((uint8_t*)pg->inline_elements,
-                                   pg->inline_elements_length * 4);
-
-            LruNode *node = lru_lookup(&pg->element_cache, h, &k);
-            VertexLruNode *found = container_of(node, VertexLruNode, node);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, found->gl_buffer);
-            if (!found->initialized) {
-                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4);
-                glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                             pg->inline_elements_length * 4,
-                             pg->inline_elements, GL_STATIC_DRAW);
-                found->initialized = true;
-            } else {
-                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4_NOTDIRTY);
-            }
-            glDrawElements(pg->shader_binding->gl_primitive_mode,
-                           pg->inline_elements_length, GL_UNSIGNED_INT,
-                           (void *)0);
-#ifdef ENABLE_NV2A_DEBUGGER
-            debug_info.last_draw_operation = NV2A_DRAW_TYPE_INLINE_ELEMENTS;
-            debug_info.last_draw_num_items = pg->inline_elements_length;
-#endif
-        } else {
-            NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
-            NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
-#ifdef ENABLE_NV2A_DEBUGGER
-            debug_info.last_draw_operation = NV2A_DRAW_TYPE_EMPTY;
-            debug_info.last_draw_num_items = 0;
-#endif
-        }
+        pgraph_flush_draw(d);
 
         /* End of visibility testing */
         if (pg->zpass_pixel_count_enable) {
@@ -2833,10 +2846,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         }
 
         NV2A_GL_DGROUP_END();
-
-#ifdef ENABLE_NV2A_DEBUGGER
-        nv2a_dbg_handle_begin_end(&debug_info);
-#endif
     } else {
         NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x", parameter);
         assert(parameter <= NV097_SET_BEGIN_END_OP_POLYGON);
@@ -3034,6 +3043,7 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         pg->draw_arrays_length = 0;
         pg->draw_arrays_min_start = -1;
         pg->draw_arrays_max_count = 0;
+        pg->draw_arrays_prevent_connect = false;
 
         /* Visibility testing */
         if (pg->zpass_pixel_count_enable) {
@@ -3185,8 +3195,35 @@ DEF_METHOD(NV097, SET_TEXTURE_SET_BUMP_ENV_OFFSET)
     pg->regs[NV_PGRAPH_BUMPOFFSET1 + slot * 4] = parameter;
 }
 
+static void pgraph_expand_draw_arrays(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    GLint start = pg->gl_draw_arrays_start[pg->draw_arrays_length - 1];
+    GLsizei count = pg->gl_draw_arrays_count[pg->draw_arrays_length - 1];
+
+    /* Render any previously squashed DRAW_ARRAYS calls. This case would be
+     * triggered if a set of BEGIN+DA+END triplets is followed by the
+     * BEGIN+DA+ARRAY_ELEMENT+... chain that caused this expansion. */
+    if (pg->draw_arrays_length > 1) {
+        pgraph_flush_draw(d);
+    }
+
+    pg->draw_arrays_length = 0;
+    pg->draw_arrays_min_start = -1;
+    pg->draw_arrays_max_count = 0;
+    pg->draw_arrays_prevent_connect = false;
+
+    assert((pg->inline_elements_length + count) < NV2A_MAX_BATCH_LENGTH);
+    for (unsigned int i = 0; i < count; i++) {
+        pg->inline_elements[pg->inline_elements_length++] = start + i;
+    }
+}
+
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 {
+    if (pg->draw_arrays_length) {
+        pgraph_expand_draw_arrays(d);
+    }
     assert(pg->inline_elements_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_elements[pg->inline_elements_length++] = parameter & 0xFFFF;
     pg->inline_elements[pg->inline_elements_length++] = parameter >> 16;
@@ -3194,6 +3231,9 @@ DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT32)
 {
+    if (pg->draw_arrays_length) {
+        pgraph_expand_draw_arrays(d);
+    }
     assert(pg->inline_elements_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_elements[pg->inline_elements_length++] = parameter;
 }
@@ -3201,14 +3241,25 @@ DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT32)
 DEF_METHOD(NV097, DRAW_ARRAYS)
 {
     unsigned int start = GET_MASK(parameter, NV097_DRAW_ARRAYS_START_INDEX);
-    unsigned int count = GET_MASK(parameter, NV097_DRAW_ARRAYS_COUNT)+1;
+    unsigned int count = GET_MASK(parameter, NV097_DRAW_ARRAYS_COUNT) + 1;
+
+    if (pg->inline_elements_length) {
+        /* FIXME: Determine HW behavior for overflow case. */
+        assert((pg->inline_elements_length + count) < NV2A_MAX_BATCH_LENGTH);
+        assert(!pg->draw_arrays_prevent_connect);
+
+        for (unsigned int i = 0; i < count; i++) {
+            pg->inline_elements[pg->inline_elements_length++] = start + i;
+        }
+        return;
+    }
 
     pg->draw_arrays_min_start = MIN(pg->draw_arrays_min_start, start);
     pg->draw_arrays_max_count = MAX(pg->draw_arrays_max_count, start + count);
 
     assert(pg->draw_arrays_length < ARRAY_SIZE(pg->gl_draw_arrays_start));
 
-    /* Attempt to connect primitives */
+    /* Attempt to connect contiguous primitives */
     if (!pg->draw_arrays_prevent_connect && pg->draw_arrays_length > 0) {
         unsigned int last_start =
             pg->gl_draw_arrays_start[pg->draw_arrays_length - 1];
