@@ -33,6 +33,7 @@ GloContext *g_nv2a_context_render;
 GloContext *g_nv2a_context_display;
 
 NV2AStats g_nv2a_stats;
+static uint32_t g_draw_count = 0;
 
 static void nv2a_profile_increment(void)
 {
@@ -66,6 +67,8 @@ static void nv2a_profile_flip_stall(void)
         (g_nv2a_stats.frame_ptr + 1) % NV2A_PROF_NUM_FRAMES;
     g_nv2a_stats.frame_count++;
     memset(&g_nv2a_stats.frame_working, 0, sizeof(g_nv2a_stats.frame_working));
+
+    g_draw_count = 0;
 }
 
 static void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
@@ -2788,8 +2791,15 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         }
 
         NV2A_GL_DGROUP_END();
+        ++g_draw_count;
     } else {
-        NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x", parameter);
+        {
+            char buffer[256] = {0};
+            sprintf(buffer, "frame_draw %d   ", g_draw_count);
+            trace_nv2a_pgraph_method(-1, 0, 0, buffer, 0, 0);
+        }
+
+        NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x Draw %d", parameter, g_draw_count);
         assert(parameter <= NV097_SET_BEGIN_END_OP_POLYGON);
 
         pgraph_update_surface(d, true, true, depth_test || stencil_test);
