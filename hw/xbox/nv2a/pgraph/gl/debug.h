@@ -31,6 +31,8 @@
 #include "gloffscreen.h"
 #include "config-host.h"
 
+extern uint32_t g_nv2a_current_frame_draw_count;  // abaire
+
 void gl_debug_initialize(void);
 void gl_debug_message(bool cc, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
 void gl_debug_group_begin(const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
