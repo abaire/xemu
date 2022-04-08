@@ -6441,8 +6441,14 @@ static void pgraph_bind_textures(NV2AState *d)
         bool surf_to_tex = false;
         SurfaceBinding *surface = pgraph_surface_get(d, texture_vram_offset);
         if (surface != NULL) {
-            surf_to_tex = pgraph_check_surface_to_texture_compatibility(
-                surface, &state);
+            if (surface->upload_pending) {
+                // Surfaces marked as dirty due to other paths (e.g., image
+                // blits) should be treated the same as render targets.
+                pgraph_upload_surface_data(d, surface, false);
+            } else {
+                surf_to_tex = pgraph_check_surface_to_texture_compatibility(
+                        surface, &state);
+            }
         }
 
         if (!surf_to_tex) {
