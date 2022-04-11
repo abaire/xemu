@@ -2856,6 +2856,12 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         NV2A_GL_DGROUP_END();
         ++g_draw_count;
     } else {
+        {
+            char buffer[256] = {0};
+            sprintf(buffer, "frame_draw %d   ", g_draw_count);
+            trace_nv2a_pgraph_method(-1, 0, 0, buffer, 0, 0);
+        }
+
         NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x Draw %d", parameter, g_draw_count);
         assert(parameter <= NV097_SET_BEGIN_END_OP_POLYGON);
 
