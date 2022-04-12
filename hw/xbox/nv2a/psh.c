@@ -558,6 +558,51 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     ps->varE = ps->varF = NULL;
 }
 
+static const char sampler2D[] = "sampler2D";
+static const char sampler3D[] = "sampler3D";
+static const char samplerCube[] = "samplerCube";
+static const char sampler2DRect[] = "sampler2DRect";
+
+static const char sampler1DShadow[] = "sampler1DShadow";
+static const char sampler2DShadow[] = "sampler2DShadow";
+static const char sampler2DRectShadow[] = "sampler2DRectShadow";
+static const char samplerCubeShadow[] = "samplerCubeShadow";
+
+static const char* get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *state, int i)
+{
+    switch (mode) {
+    default:
+    case PS_TEXTUREMODES_NONE:
+        return NULL;
+
+    case PS_TEXTUREMODES_PROJECT2D:
+    case PS_TEXTUREMODES_BUMPENVMAP:
+    case PS_TEXTUREMODES_BUMPENVMAP_LUM:
+    case PS_TEXTUREMODES_DOT_ST:
+        if (state->depth_tex_max[i] > 0.0f) {
+            return state->rect_tex[i] ? sampler1DShadow : sampler2DShadow;
+        }
+        return state->rect_tex[i] ? sampler2DRect : sampler2D;
+
+    case PS_TEXTUREMODES_PROJECT3D:
+    case PS_TEXTUREMODES_DOT_STR_3D:
+        if (state->depth_tex_max[i] > 0.0f) {
+            return state->rect_tex[i] ? sampler2DRectShadow : sampler2DShadow;
+        }
+        return sampler3D;
+
+    case PS_TEXTUREMODES_CUBEMAP:
+    case PS_TEXTUREMODES_DOT_RFLCT_DIFF:
+    case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
+    case PS_TEXTUREMODES_DOT_STR_CUBE:
+        return state->depth_tex_max[i] > 0.0f ? samplerCubeShadow : samplerCube;
+
+    case PS_TEXTUREMODES_DPNDNT_AR:
+    case PS_TEXTUREMODES_DPNDNT_GB:
+        return state->depth_tex_max[i] > 0.0f ? sampler2DShadow : sampler2D;
+    }
+}
+
 static MString* psh_convert(struct PixelShader *ps)
 {
     int i;
@@ -697,7 +742,7 @@ static MString* psh_convert(struct PixelShader *ps)
 
     for (i = 0; i < 4; i++) {
 
-        const char *sampler_type = NULL;
+        const char *sampler_type = get_sampler_type(ps->tex_modes[i], &ps->state, i);
 
         assert(ps->dot_map[i] < 8);
         const char *dotmap_func = dotmap_funcs[ps->dot_map[i]];
@@ -711,7 +756,7 @@ static MString* psh_convert(struct PixelShader *ps)
                                i);
             break;
         case PS_TEXTUREMODES_PROJECT2D: {
-            sampler_type = ps->state.rect_tex[i] ? "sampler2DRect" : "sampler2D";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for Project2D");
             const char *lookup = "textureProj";
             if ((ps->state.conv_tex[i] == CONVOLUTION_FILTER_GAUSSIAN)
                 || (ps->state.conv_tex[i] == CONVOLUTION_FILTER_QUINCUNX)) {
@@ -731,12 +776,21 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         }
         case PS_TEXTUREMODES_PROJECT3D:
-            sampler_type = "sampler3D";
-            mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
-                               i, i, i);
+            if (ps->state.depth_tex_max[i] != 0.0f) {
+                mstring_append_fmt(vars, "vec3 pT%dShadowCoord = pT%d.xyz / pT%d.w;\n",
+                                   i, i, i, i);
+                // OpenGL normalizes the depth texture to [0,1]; nv2a does not,
+                //  so the z component must be fixed up.
+                mstring_append_fmt(vars, "pT%dShadowCoord.z /= %f;\n", i, ps->state.depth_tex_max[i]);
+                mstring_append_fmt(vars, "vec4 t%d = vec4(texture(texSamp%d, pT%dShadowCoord));\n",
+                                   i, i, i);
+            } else {
+                mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
+                                   i, i, i);
+            }
             break;
         case PS_TEXTUREMODES_CUBEMAP:
-            sampler_type = "samplerCube";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for Cubemap");
             mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, pT%d.xyz / pT%d.w);\n",
                                i, i, i, i);
             break;
@@ -756,7 +810,7 @@ static MString* psh_convert(struct PixelShader *ps)
         }
         case PS_TEXTUREMODES_BUMPENVMAP:
             assert(i >= 1);
-            sampler_type = ps->state.rect_tex[i] ? "sampler2DRect" : "sampler2D";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for BumpEnvMap");
             mstring_append_fmt(preflight, "uniform mat2 bumpMat%d;\n", i);
 
             if (ps->state.snorm_tex[ps->input_tex[i]]) {
@@ -776,7 +830,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_BUMPENVMAP_LUM:
             assert(i >= 1);
-            sampler_type = ps->state.rect_tex[i] ? "sampler2DRect" : "sampler2D";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for BumpEnvMapLum");
             mstring_append_fmt(preflight, "uniform float bumpScale%d;\n", i);
             mstring_append_fmt(preflight, "uniform float bumpOffset%d;\n", i);
             mstring_append_fmt(preflight, "uniform mat2 bumpMat%d;\n", i);
@@ -806,7 +860,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DOT_ST:
             assert(i >= 2);
-            sampler_type = ps->state.rect_tex[i] ? "sampler2DRect" : "sampler2D";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for DOT_ST");
             mstring_append_fmt(vars, "/* PS_TEXTUREMODES_DOT_ST */\n");
             mstring_append_fmt(vars, "float dot%d = dot(pT%d.xyz, %s(t%d.rgb));\n",
                 i, i, dotmap_func, ps->input_tex[i]);
@@ -823,7 +877,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DOT_RFLCT_DIFF:
             assert(i == 2);
-            sampler_type = "samplerCube";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for RFLCT_DIFF");
             mstring_append_fmt(vars, "/* PS_TEXTUREMODES_DOT_RFLCT_DIFF */\n");
             mstring_append_fmt(vars, "float dot%d = dot(pT%d.xyz, %s(t%d.rgb));\n",
                 i, i, dotmap_func, ps->input_tex[i]);
@@ -837,7 +891,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
             assert(i == 3);
-            sampler_type = "samplerCube";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for RFLCT_SPEC");
             mstring_append_fmt(vars, "/* PS_TEXTUREMODES_DOT_RFLCT_SPEC */\n");
             mstring_append_fmt(vars, "float dot%d = dot(pT%d.xyz, %s(t%d.rgb));\n",
                 i, i, dotmap_func, ps->input_tex[i]);
@@ -852,7 +906,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DOT_STR_3D:
             assert(i == 3);
-            sampler_type = "sampler3D";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for DOT_STR_3D");
             mstring_append_fmt(vars, "/* PS_TEXTUREMODES_DOT_STR_3D */\n");
             mstring_append_fmt(vars, "float dot%d = dot(pT%d.xyz, %s(t%d.rgb));\n",
                 i, i, dotmap_func, ps->input_tex[i]);
@@ -861,7 +915,7 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DOT_STR_CUBE:
             assert(i == 3);
-            sampler_type = "samplerCube";
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for DOT_STR_CUBE");
             mstring_append_fmt(vars, "/* PS_TEXTUREMODES_DOT_STR_CUBE */\n");
             mstring_append_fmt(vars, "float dot%d = dot(pT%d.xyz, %s(t%d.rgb));\n",
                 i, i, dotmap_func, ps->input_tex[i]);
@@ -870,15 +924,15 @@ static MString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_DPNDNT_AR:
             assert(i >= 1);
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for DPNDNT_AR");
             assert(!ps->state.rect_tex[i]);
-            sampler_type = "sampler2D";
             mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.ar);\n",
                 i, i, ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_DPNDNT_GB:
             assert(i >= 1);
+            assert((ps->state.depth_tex_max[i] == 0.0f) && "Shadow handling not implemented for DPNDNT_GB");
             assert(!ps->state.rect_tex[i]);
-            sampler_type = "sampler2D";
             mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.gb);\n",
                 i, i, ps->input_tex[i]);
             break;

@@ -365,6 +365,18 @@ static const SurfaceFormatInfo kelvin_surface_zeta_int_format_map[] = {
         {4, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, GL_DEPTH_STENCIL_ATTACHMENT},
 };
 
+static float pgraph_depth_texture_max_value(const ColorFormatInfo *f) {
+    switch (f->gl_internal_format) {
+    case GL_DEPTH_COMPONENT16:
+        return (float)0xFFFF;
+
+    case GL_DEPTH24_STENCIL8:
+        return (float)0xFFFFFF;
+
+    default:
+        return 0.0f;
+    }
+}
 
 // static void pgraph_set_context_user(NV2AState *d, uint32_t val);
 static void pgraph_gl_fence(void);
@@ -3643,6 +3655,12 @@ DEF_METHOD(NV097, SET_SHADOW_ZSLOPE_THRESHOLD)
     assert(parameter == 0x7F800000); /* FIXME: Unimplemented */
 }
 
+DEF_METHOD(NV097, SET_SHADOW_COMPARE_FUNC)
+{
+    assert(parameter < ARRAY_SIZE(pgraph_depth_func_map));
+    pg->gl_texture_compare_func = pgraph_depth_func_map[parameter];
+}
+
 DEF_METHOD(NV097, SET_SHADER_STAGE_PROGRAM)
 {
     pg->regs[NV_PGRAPH_SHADERPROG] = parameter;
@@ -3949,6 +3967,7 @@ void pgraph_init(NV2AState *d)
 
     pg->shader_cache = g_hash_table_new(shader_hash, shader_equal);
 
+    pg->gl_texture_compare_func = GL_NEVER;
     pg->material_alpha = 0.0f;
 
     for (i=0; i<NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
@@ -4494,6 +4513,8 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
          */
         state.psh.snorm_tex[i] = (f.gl_internal_format == GL_RGB8_SNORM)
                                  || (f.gl_internal_format == GL_RG8_SNORM);
+
+        state.psh.depth_tex_max[i] = pgraph_depth_texture_max_value(&f);
 
         uint32_t filter = pg->regs[NV_PGRAPH_TEXFILTER0 + i*4];
         unsigned int min_filter = GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MIN);
@@ -6601,6 +6622,17 @@ static void pgraph_bind_textures(NV2AState *d)
             };
             glTexParameterfv(binding->gl_target, GL_TEXTURE_BORDER_COLOR,
                 gl_border_color);
+        }
+
+        if (pgraph_depth_texture_max_value(&f) != 0.0f) {
+            glTexParameteri(binding->gl_target, GL_TEXTURE_COMPARE_FUNC,
+                            pg->gl_texture_compare_func);
+            /* Depth types are always used as shadow samplers by the HW. */
+            glTexParameteri(binding->gl_target, GL_TEXTURE_COMPARE_MODE,
+                GL_COMPARE_REF_TO_TEXTURE);
+        } else {
+            glTexParameteri(binding->gl_target, GL_TEXTURE_COMPARE_MODE,
+                GL_NONE);
         }
 
         if (pg->texture_binding[i]) {

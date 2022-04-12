@@ -57,6 +57,9 @@ typedef struct PshState {
     bool alphakill[4];
     enum ConvolutionFilter conv_tex[4];
 
+    /* Maximum value for a depth texture, 0.0f indicates a non-depth binding */
+    float depth_tex_max[4];
+
     bool alpha_test;
     enum PshAlphaFunc alpha_func;
 
