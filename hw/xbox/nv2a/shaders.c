@@ -706,6 +706,7 @@ static MString *generate_vertex_shader(const ShaderState state,
 "#version 400\n"
 "\n"
 "uniform vec2 clipRange;\n"
+"float gl_ClipDistance[2];\n"
 "uniform vec2 surfaceSize;\n"
 "uniform vec2 glViewportSize;\n"
 "\n"

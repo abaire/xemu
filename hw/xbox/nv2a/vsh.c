@@ -855,6 +855,13 @@ void vsh_translate(uint16_t version,
          */
         "  if (clipRange.y != clipRange.x) {\n"
         "    oPos.z = (oPos.z - clipRange.x)/(0.5*(clipRange.y - clipRange.x)) - 1;\n"
+        "    gl_ClipDistance[0] = -1.0f;\n"
+        "    gl_ClipDistance[1] = 1.0f;\n"
+        "  } else {\n"
+        // Clipping is disabled, treat all vertices as being on the correct side
+        // of the plane.
+        "    gl_ClipDistance[0] = 1.0f;\n"
+        "    gl_ClipDistance[1] = 1.0f;\n"
         "  }\n"
 
         /* Correct for the perspective divide */
