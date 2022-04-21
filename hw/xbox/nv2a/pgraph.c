@@ -4212,6 +4212,13 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
 
     if (binding->clip_range_loc != -1) {
         glUniform2f(binding->clip_range_loc, zclip_min, zclip_max);
+        if (zclip_min == zclip_max) {
+            glEnable(GL_CLIP_PLANE0);
+            glEnable(GL_CLIP_PLANE1);
+        } else {
+            glDisable(GL_CLIP_PLANE0);
+            glDisable(GL_CLIP_PLANE1);
+        }
     }
 
     if (binding->gl_viewport_size_loc != -1) {
