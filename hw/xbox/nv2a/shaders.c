@@ -675,8 +675,8 @@ GLSL_DEFINE(materialEmissionColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_CM_COL) ".xyz
     }
 
     mstring_append(body,
-    "   oPos = invViewport * (tPosition * compositeMat);\n"
-    "   oPos.z = oPos.z * 2.0 - oPos.w;\n");
+        "   oPos = invViewport * (tPosition * compositeMat);\n"
+        "   oPos.z = oPos.z * 2.0 - oPos.w;\n");
 
     /* FIXME: Testing */
     if (state.point_params_enable) {
@@ -912,7 +912,7 @@ static GLuint create_gl_shader(GLenum gl_shader_type,
 
     NV2A_GL_DGROUP_BEGIN("Creating new %s", name);
 
-    NV2A_DPRINTF("compile new %s, code:\n%s\n", name, code);
+    printf("compile new %s, code:\n%s\n", name, code);
 
     GLuint shader = glCreateShader(gl_shader_type);
     glShaderSource(shader, 1, &code, 0);

@@ -4016,6 +4016,170 @@ void pgraph_destroy(PGRAPHState *pg)
     glo_context_destroy(g_nv2a_context_display);
 }
 
+static void pgraph_calculate_inverse_viewport_matrix(PGRAPHState *pg, float *ret)
+{
+    unsigned int aa_width = 1, aa_height = 1;
+    pgraph_apply_anti_aliasing_factor(pg, &aa_width, &aa_height);
+
+    // TODO: Get rid of the copy here, just access the vsh_constants directly
+    // Use a macro to make things pretty.
+    float composite_matrix[16];
+    float inv_model_view_matrix[16];
+    for (int row = 0, i = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col, ++i) {
+            composite_matrix[i] = *(float *) &pg->vsh_constants[NV_IGRAPH_XF_XFCTX_CMAT0 + row][col];
+            inv_model_view_matrix[i] = *(float *) &pg->vsh_constants[NV_IGRAPH_XF_XFCTX_IMMAT0 + row][col];
+        }
+    }
+
+    float projection_viewport_matrix[16];
+    projection_viewport_matrix[0] =
+            inv_model_view_matrix[0] * composite_matrix[0] + inv_model_view_matrix[1] * composite_matrix[4] + inv_model_view_matrix[2] * composite_matrix[8] + inv_model_view_matrix[3] * composite_matrix[12];
+    projection_viewport_matrix[1] =
+            inv_model_view_matrix[0] * composite_matrix[1] + inv_model_view_matrix[1] * composite_matrix[5] + inv_model_view_matrix[2] * composite_matrix[9] + inv_model_view_matrix[3] * composite_matrix[13];
+    projection_viewport_matrix[2] =
+            inv_model_view_matrix[0] * composite_matrix[2] + inv_model_view_matrix[1] * composite_matrix[6] + inv_model_view_matrix[2] * composite_matrix[10] + inv_model_view_matrix[3] * composite_matrix[14];
+    projection_viewport_matrix[3] =
+            inv_model_view_matrix[0] * composite_matrix[3] + inv_model_view_matrix[1] * composite_matrix[7] + inv_model_view_matrix[2] * composite_matrix[11] + inv_model_view_matrix[3] * composite_matrix[15];
+    projection_viewport_matrix[4] =
+            inv_model_view_matrix[4] * composite_matrix[0] + inv_model_view_matrix[5] * composite_matrix[4] + inv_model_view_matrix[6] * composite_matrix[8] + inv_model_view_matrix[7] * composite_matrix[12];
+    projection_viewport_matrix[5] =
+            inv_model_view_matrix[4] * composite_matrix[1] + inv_model_view_matrix[5] * composite_matrix[5] + inv_model_view_matrix[6] * composite_matrix[9] + inv_model_view_matrix[7] * composite_matrix[13];
+    projection_viewport_matrix[6] =
+            inv_model_view_matrix[4] * composite_matrix[2] + inv_model_view_matrix[5] * composite_matrix[6] + inv_model_view_matrix[6] * composite_matrix[10] + inv_model_view_matrix[7] * composite_matrix[14];
+    projection_viewport_matrix[7] =
+            inv_model_view_matrix[4] * composite_matrix[3] + inv_model_view_matrix[5] * composite_matrix[7] + inv_model_view_matrix[6] * composite_matrix[11] + inv_model_view_matrix[7] * composite_matrix[15];
+    projection_viewport_matrix[8] =
+            inv_model_view_matrix[8] * composite_matrix[0] + inv_model_view_matrix[9] * composite_matrix[4] + inv_model_view_matrix[10] * composite_matrix[8] + inv_model_view_matrix[11] * composite_matrix[12];
+    projection_viewport_matrix[9] =
+            inv_model_view_matrix[8] * composite_matrix[1] + inv_model_view_matrix[9] * composite_matrix[5] + inv_model_view_matrix[10] * composite_matrix[9] + inv_model_view_matrix[11] * composite_matrix[13];
+    projection_viewport_matrix[10] =
+            inv_model_view_matrix[8] * composite_matrix[2] + inv_model_view_matrix[9] * composite_matrix[6] + inv_model_view_matrix[10] * composite_matrix[10] + inv_model_view_matrix[11] * composite_matrix[14];
+    projection_viewport_matrix[11] =
+            inv_model_view_matrix[8] * composite_matrix[3] + inv_model_view_matrix[9] * composite_matrix[7] + inv_model_view_matrix[10] * composite_matrix[11] + inv_model_view_matrix[11] * composite_matrix[15];
+    projection_viewport_matrix[12] =
+            inv_model_view_matrix[12] * composite_matrix[0] + inv_model_view_matrix[13] * composite_matrix[4] + inv_model_view_matrix[14] * composite_matrix[8] + inv_model_view_matrix[15] * composite_matrix[12];
+    projection_viewport_matrix[13] =
+            inv_model_view_matrix[12] * composite_matrix[1] + inv_model_view_matrix[13] * composite_matrix[5] + inv_model_view_matrix[14] * composite_matrix[9] + inv_model_view_matrix[15] * composite_matrix[13];
+    projection_viewport_matrix[14] =
+            inv_model_view_matrix[12] * composite_matrix[2] + inv_model_view_matrix[13] * composite_matrix[6] + inv_model_view_matrix[14] * composite_matrix[10] + inv_model_view_matrix[15] * composite_matrix[14];
+    projection_viewport_matrix[15] =
+            inv_model_view_matrix[12] * composite_matrix[3] + inv_model_view_matrix[13] * composite_matrix[7] + inv_model_view_matrix[14] * composite_matrix[11] + inv_model_view_matrix[15] * composite_matrix[15];
+
+    // COMPOSITE_MATRIX: NV_IGRAPH_XF_XFCTX_CMAT0
+    // INVERSE_MODEL_VIEW_MATRIX: NV_IGRAPH_XF_XFCTX_IMMAT0
+
+    // Maximum depth buffer value:
+
+//        switch(pg->surface_shape.zeta_format) {
+//            case NV097_SET_SURFACE_FORMAT_ZETA_Z16: {
+//                uint16_t z = clear_zstencil & 0xFFFF;
+//                /* FIXME: Remove bit for stencil clear? */
+//                if (pg->surface_shape.z_format) {
+//                    gl_clear_depth = convert_f16_to_float(z) / f16_max;
+//                } else {
+//                    gl_clear_depth = z / (float)0xFFFF;
+//                }
+//                break;
+//            }
+//            case NV097_SET_SURFACE_FORMAT_ZETA_Z24S8: {
+//                gl_clear_stencil = clear_zstencil & 0xFF;
+//                uint32_t z = clear_zstencil >> 8;
+//                if (pg->surface_shape.z_format) {
+//                    gl_clear_depth = convert_f24_to_float(z) / f24_max;
+//                    assert(false); /* FIXME: Untested */
+//                } else {
+//                    gl_clear_depth = z / (float)0xFFFFFF;
+//                }
+//                break;
+//            }
+
+//        DEF_METHOD_INC(NV097, SET_INVERSE_MODEL_VIEW_MATRIX)
+//        {
+//            int slot = (method - NV097_SET_INVERSE_MODEL_VIEW_MATRIX) / 4;
+//            unsigned int matnum = slot / 16;
+//            unsigned int entry = slot % 16;
+//            unsigned int row = NV_IGRAPH_XF_XFCTX_IMMAT0 + matnum*8 + entry/4;
+//            pg->vsh_constants[row][entry % 4] = parameter;
+//            pg->vsh_constants_dirty[row] = true;
+//        }
+//
+//        DEF_METHOD_INC(NV097, SET_COMPOSITE_MATRIX)
+//        {
+//            int slot = (method - NV097_SET_COMPOSITE_MATRIX) / 4;
+//            unsigned int row = NV_IGRAPH_XF_XFCTX_CMAT0 + slot/4;
+//            pg->vsh_constants[row][slot%4] = parameter;
+//            pg->vsh_constants_dirty[row] = true;
+//        }
+
+// DEF_METHOD_INC(NV097, SET_PROJECTION_MATRIX)
+//{
+//    int slot = (method - NV097_SET_PROJECTION_MATRIX) / 4;
+//    // pg->projection_matrix[slot] = *(float*)&parameter;
+//    unsigned int row = NV_IGRAPH_XF_XFCTX_PMAT0 + slot/4;
+//    pg->vsh_constants[row][slot%4] = parameter;
+//    pg->vsh_constants_dirty[row] = true;
+//}
+
+//        ret[_33] = max_depthbuffer_value * (z_max - z_min);
+//        ret[_43] = max_depthbuffer_value * z_min;
+
+
+  // Assuming that the viewport matrix was generated by DirectX and not manually
+  // some guarantees can be made that allow the viewport to be derived from the
+  // projection * viewport matrix (which is the composite matrix * the inverse
+  // model view).
+
+  /*
+   * c10 = p10 * v10 + v14
+   * c14 = p14 * v10
+   *
+   * c10 = (zf / (zf - zn)) * (MaxDepthBuffer * (MaxZ - MinZ)) + (MaxDepthBuffer * MinZ)
+   * c14 = (-zn * zf / (zf - zn)) * (MaxDepthBuffer * (MaxZ - MinZ))
+   *
+   * If skinning is enabled, the inverse modelview does not need to be applied
+   * as the composite matrix does not get modified by the mv.
+   */
+
+
+
+    float foo = projection_viewport_matrix[10];
+    float bar = projection_viewport_matrix[11];
+
+    float reconstructed_10 = 1.0f / foo;
+    float reconstructed_14 = -bar / foo;
+
+    float zclip_max = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMAX];
+    float zclip_min = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMIN];
+
+    float m11 = 0.5 * (pg->surface_binding_dim.width / aa_width);
+    float m22 = -0.5 * (pg->surface_binding_dim.height / aa_height);
+    float m33 = zclip_max - zclip_min;
+    float m41 = *(float *) &pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPOFF][0];
+    float m42 = *(float *) &pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPOFF][1];
+    float m43 = zclip_min;
+    if (m33 == 0.0) {
+        m33 = 1.0;
+    }
+
+    ret[0] = 1.0f / m11;
+    ret[1] = 0.0f;
+    ret[2] = 0.0f;
+    ret[3] = 0.0f;
+    ret[4] = 0;
+    ret[5] = 1.0 / m22;
+    ret[6] = 0;
+    ret[7] = 0;
+    ret[8] = 0;
+    ret[9] = 0;
+    ret[10] = 1.0 / m33;
+    ret[11] = 0;
+    ret[12] = -1.0 + m41 / m11;
+    ret[13] = 1.0 + m42 / m22;
+    ret[14] = -m43 / m33;
+    ret[15] = 1.0;
+}
+
 static void pgraph_shader_update_constants(PGRAPHState *pg,
                                            ShaderBinding *binding,
                                            bool binding_changed,
@@ -4160,25 +4324,14 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
         }
 
         /* estimate the viewport by assuming it matches the surface ... */
-        unsigned int aa_width = 1, aa_height = 1;
-        pgraph_apply_anti_aliasing_factor(pg, &aa_width, &aa_height);
 
-        float m11 = 0.5 * (pg->surface_binding_dim.width/aa_width);
-        float m22 = -0.5 * (pg->surface_binding_dim.height/aa_height);
-        float m33 = zclip_max - zclip_min;
-        float m41 = *(float*)&pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPOFF][0];
-        float m42 = *(float*)&pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPOFF][1];
-        float m43 = zclip_min;
-        if (m33 == 0.0) {
-            m33 = 1.0;
-        }
+        // zclip_max and zclip_min are wrong, this probably should never deal
+        // with clipping at all and instead needs to know the values that were
+        // actually used to construct the viewport matrix via D3DVIEWPORT8 and
+        // then scaled with the maximum depth buffer value.
 
-        float invViewport[16] = {
-            1.0/m11, 0, 0, 0,
-            0, 1.0/m22, 0, 0,
-            0, 0, 1.0/m33, 0,
-            -1.0+m41/m11, 1.0+m42/m22, -m43/m33, 1.0
-        };
+        float invViewport[16];
+        pgraph_calculate_inverse_viewport_matrix(pg, invViewport);
 
         if (binding->inv_viewport_loc != -1) {
             glUniformMatrix4fv(binding->inv_viewport_loc,
