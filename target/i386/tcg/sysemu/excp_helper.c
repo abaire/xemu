@@ -17,6 +17,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdio.h>
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "tcg/helper-tcg.h"
@@ -462,6 +463,14 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
 
     env->retaddr = retaddr;
     if (handle_mmu_fault(cs, addr, size, access_type, mmu_idx)) {
+#ifdef XBOX
+        fprintf(stderr,
+                "MMU fault: ExceptionIndex: EXCP%02X ErrorCode: %d ReturnAddr: %lX EIP: %X\n",
+                cs->exception_index,
+                env->error_code,
+                retaddr,
+                env->eip);
+#endif
         /* FIXME: On error in get_hphys we have already jumped out.  */
         g_assert(!probe);
         raise_exception_err_ra(env, cs->exception_index,
