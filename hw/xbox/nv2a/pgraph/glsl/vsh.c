@@ -128,6 +128,25 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
             }
         }
     }
+
+    mstring_append(header,
+        "/* Converts the input to vec4, pads with last component */\n"
+        "vec4 _in(float v) { return vec4(v); }\n"
+        "vec4 _in(vec2 v) { return v.xyyy; }\n"
+        "vec4 _in(vec3 v) { return v.xyzz; }\n"
+        "vec4 _in(vec4 v) { return v.xyzw; }\n"
+        "\n"
+        "#define FixNaN(src, mask) _FixNaN(_in(src)).mask\n"
+        "vec4 _FixNaN(vec4 src)\n"
+        "{\n"
+        "  bvec4 nans = isnan(src);\n"
+        "  if (!any(nans)) {\n"
+        "    return src;\n"
+        "  }\n"
+        "  ivec4 signs = sign(floatBitsToInt(src));\n"
+        "  return mix(src, vec4(1.0) * signs, nans);\n"
+        "}\n");
+
     mstring_append(header, "\n");
 
     MString *body = mstring_from_str("void main() {\n");
@@ -243,7 +262,7 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
     mstring_append(body, "\n"
                    "  vtxD0 = clamp(oD0, 0.0, 1.0);\n"
                    "  vtxB0 = clamp(oB0, 0.0, 1.0);\n"
-                   "  vtxFog = oFog.x;\n"
+                   "  vtxFog = FixNaN(oFog, x);\n"
                    "  vtxT0 = oT0;\n"
                    "  vtxT1 = oT1;\n"
                    "  vtxT2 = oT2;\n"
