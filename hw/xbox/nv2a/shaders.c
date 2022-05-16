@@ -769,6 +769,22 @@ STRUCT_VERTEX_DATA);
                                i, i);
         }
     }
+    mstring_append(header,
+                   "/* Converts the input to vec4, pads with last component */\n"
+                   "vec4 _in(float v) { return vec4(v); }\n"
+                   "vec4 _in(vec2 v) { return v.xyyy; }\n"
+                   "vec4 _in(vec3 v) { return v.xyzz; }\n"
+                   "vec4 _in(vec4 v) { return v.xyzw; }\n"
+                   "#define FixNaN(src, mask) _FixNaN(_in(src)).mask\n"
+                   "vec4 _FixNaN(vec4 src)\n"
+                   "{\n"
+                   "  bvec4 nans = isnan(src);\n"
+                   "  if (!any(nans)) {\n"
+                   "    return src;\n"
+                   "  }\n"
+                   "  ivec4 signs = floatBitsToInt(src);\n"
+                   "  return mix(src, mix(vec4(1.0), vec4(0.0), lessThan(signs, ivec4(0))), nans);\n"
+                   "}\n");
     mstring_append(header, "\n");
 
     MString *body = mstring_from_str("void main() {\n");
@@ -879,15 +895,15 @@ STRUCT_VERTEX_DATA);
 
     /* Set outputs */
     mstring_append(body, "\n"
-                      "  vtx.D0 = clamp(oD0, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.D1 = clamp(oD1, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.B0 = clamp(oB0, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.B1 = clamp(oB1, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.Fog = oFog.x * vtx.inv_w;\n"
-                      "  vtx.T0 = oT0 * vtx.inv_w;\n"
-                      "  vtx.T1 = oT1 * vtx.inv_w;\n"
-                      "  vtx.T2 = oT2 * vtx.inv_w;\n"
-                      "  vtx.T3 = oT3 * vtx.inv_w;\n"
+                      "  vtx.D0 = clamp(FixNaN(oD0, xyzw), 0.0, 1.0) * vtx.inv_w;\n"
+                      "  vtx.D1 = clamp(FixNaN(oD1, xyzw), 0.0, 1.0) * vtx.inv_w;\n"
+                      "  vtx.B0 = clamp(FixNaN(oB0, xyzw), 0.0, 1.0) * vtx.inv_w;\n"
+                      "  vtx.B1 = clamp(FixNaN(oB1, xyzw), 0.0, 1.0) * vtx.inv_w;\n"
+                      "  vtx.Fog = FixNaN(oFog, x) * vtx.inv_w;\n"
+                      "  vtx.T0 = FixNaN(oT0, xyzw) * vtx.inv_w;\n"
+                      "  vtx.T1 = FixNaN(oT1, xyzw) * vtx.inv_w;\n"
+                      "  vtx.T2 = FixNaN(oT2, xyzw) * vtx.inv_w;\n"
+                      "  vtx.T3 = FixNaN(oT3, xyzw) * vtx.inv_w;\n"
                       "  gl_Position = oPos;\n"
                       "  gl_PointSize = oPts.x;\n"
                       "\n"
