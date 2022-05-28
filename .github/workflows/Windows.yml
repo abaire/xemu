@@ -1,0 +1,165 @@
+name: Build
+
+on:
+  push:
+    paths-ignore:
+      - '.github/**'
+      - '!.github/workflows/**'
+      - 'README.md'
+  pull_request:
+    paths-ignore:
+      - '.github/**'
+      - '!.github/workflows/**'
+      - 'README.md'
+
+jobs:
+  Init:
+    name: Create source package
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clone tree
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    # On push to master, increment patch version and create a new tag on release
+    - name: Increment patch version
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      run: |
+        git config user.name "nobody"
+        git config user.email "nobody@nowhere"
+        VERSION=$(git describe --tags --match 'v*' --abbrev=0 | xargs ./scripts/increment-semver.py)
+        git tag -a $VERSION -m $VERSION
+        echo "Generated new release version: $VERSION"
+    # GitHub treats the new tag as lightweight, so older tags will shadow the
+    # new tag. Recreate it as an annotated tag now so the version script picks
+    # it up properly.
+    - name: Annotate release tag
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      run: |
+        git config user.name "nobody"
+        git config user.email "nobody@nowhere"
+        VERSION=${GITHUB_REF/refs\/tags\//}
+        git tag -a -f $VERSION $VERSION -m $VERSION
+        echo "Recreated release tag: $VERSION"
+    - name: Create source package
+      run: |
+        ./scripts/archive-source.sh src.tar
+        gzip -1 src.tar
+    - name: Upload source package artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: src.tar.gz
+        path: src.tar.gz
+
+  Windows:
+    name: Build for Windows (${{ matrix.configuration }}) on Ubuntu
+    runs-on: ubuntu-latest
+    needs: Init
+    strategy:
+      matrix:
+        include:
+        - configuration: Release
+          build_param:
+          artifact_name: xemu-win-release
+          artifact_filename: xemu-win-release.zip
+    env:
+      DOCKER_IMAGE_NAME: mborgerson/xemu-ubuntu-win64-cross:latest
+    steps:
+    - name: Download source package
+      uses: actions/download-artifact@v2
+      with:
+        name: src.tar.gz
+    - name: Extract source package
+      run: tar xf src.tar.gz
+    - name: Initialize compiler cache
+      id: cache
+      uses: actions/cache@v2
+      with:
+        path: /tmp/xemu-ccache
+        key: cache-wincross-${{ runner.os }}-${{ matrix.configuration }}-${{ github.sha }}
+        restore-keys: cache-wincross-${{ runner.os }}-${{ matrix.configuration }}-
+    - name: Pull Docker image
+      run: docker pull $DOCKER_IMAGE_NAME
+    - name: Compile
+      run: |
+        mkdir -p /tmp/xemu-ccache
+        docker run --rm \
+          -v $PWD:/xemu -w /xemu \
+          -v /tmp/xemu-ccache:/tmp/xemu-ccache \
+          -e CCACHE_DIR=/tmp/xemu-ccache \
+          -e CCACHE_MAXSIZE=512M \
+          -u $(id -u):$(id -g) \
+          $DOCKER_IMAGE_NAME \
+            bash -c "ccache -z; ./build.sh -p win64-cross ${{ matrix.build_param }} && ccache -s"
+        cd dist
+        zip -r ../${{ matrix.artifact_filename }} *
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.artifact_filename }}
+
+  Release:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    needs: [Windows]
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v2
+      with:
+        path: dist
+    - name: Extract source package
+      run: tar xf dist/src.tar.gz/src.tar.gz
+    - name: Get release info
+      run: |
+        echo "XEMU_VERSION=$(cat XEMU_VERSION)" >> $GITHUB_ENV
+    - name: Publish release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ env.XEMU_VERSION }}
+        name: v${{ env.XEMU_VERSION }}
+        prerelease: false
+        draft: false
+        files: |
+          dist/src.tar.gz/src.tar.gz
+          dist/xemu-win-release/xemu-win-release.zip
+  # Sync archive version of source (including submodule code) to the
+  # ppa-snapshot branch to work around limitations of the Launchpad platform,
+  # namely: no network egress on package build, no custom scripting in source
+  # package creation.
+  PushToPPA:
+    name: Push to PPA Snapshot Branch
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [Windows]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download source package
+      uses: actions/download-artifact@v2
+      with:
+        name: src.tar.gz
+    - name: Extract source package
+      run: |
+        mkdir src
+        tar -C src -xf src.tar.gz
+    - name: Clone Debian packaging
+      uses: actions/checkout@v2
+      with:
+        ref: deb
+        path: debian-tmp
+    - name: Integrate Debian packaging
+      run: |
+        mv debian-tmp/debian src
+        rm -rf debian-tmp
+        pushd src
+        echo -e "\
+        xemu (1:$(cat XEMU_VERSION)-0) unstable; urgency=medium\n\
+          Built from $(cat XEMU_VERSION)\n\
+         -- Matt Borgerson <contact@mborgerson.com>  $(date -R)" > debian/changelog
+        popd
+    - name: Deploy source archive to branch
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./src
+        publish_branch: ppa-snapshot
+        force_orphan: true
