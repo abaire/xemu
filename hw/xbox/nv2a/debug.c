@@ -198,12 +198,34 @@ void gl_debug_frame_terminator(void)
 }
 
 #ifdef CONFIG_RENDERDOC
-bool nv2a_dbg_renderdoc_available(void) {
+bool nv2a_dbg_renderdoc_available(void)
+{
     return rdoc_api != NULL;
 }
 
-void nv2a_dbg_renderdoc_capture_frames(uint32_t num_frames) {
+void nv2a_dbg_renderdoc_capture_frames(uint32_t num_frames)
+{
     renderdoc_capture_frames = num_frames;
+}
+
+void nv2a_dbg_renderdoc_capture_start(void)
+{
+    if (!rdoc_api || !rdoc_api->IsTargetControlConnected()) {
+        return;
+    }
+
+    rdoc_api->StartFrameCapture(NULL, NULL);
+}
+
+void nv2a_dbg_renderdoc_capture_end(void)
+{
+    if (!rdoc_api || !rdoc_api->IsTargetControlConnected()) {
+        return;
+    }
+
+    if (rdoc_api->IsFrameCapturing()) {
+        rdoc_api->EndFrameCapture(NULL, NULL);
+    }
 }
 #endif
 
