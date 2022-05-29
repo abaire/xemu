@@ -93,3 +93,23 @@ void nv2a_dbg_renderdoc_capture_frames(int num_frames)
 {
     renderdoc_capture_frames += num_frames;
 }
+
+void nv2a_dbg_renderdoc_capture_start(void)
+{
+    if (!rdoc_api || !rdoc_api->IsTargetControlConnected()) {
+        return;
+    }
+
+    rdoc_api->StartFrameCapture(NULL, NULL);
+}
+
+void nv2a_dbg_renderdoc_capture_end(void)
+{
+    if (!rdoc_api || !rdoc_api->IsTargetControlConnected()) {
+        return;
+    }
+
+    if (rdoc_api->IsFrameCapturing()) {
+        rdoc_api->EndFrameCapture(NULL, NULL);
+    }
+}
