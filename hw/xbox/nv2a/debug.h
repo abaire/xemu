@@ -68,6 +68,8 @@ extern "C" {
 #ifdef CONFIG_RENDERDOC
 bool nv2a_dbg_renderdoc_available(void);
 void nv2a_dbg_renderdoc_capture_frames(uint32_t num_frames);
+void nv2a_dbg_renderdoc_capture_start(void);
+void nv2a_dbg_renderdoc_capture_end(void);
 #endif
 
 #ifdef __cplusplus
