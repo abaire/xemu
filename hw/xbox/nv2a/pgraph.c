@@ -904,6 +904,7 @@ static void pgraph_image_blit(NV2AState *d)
             surf_dest->download_pending = false;
             surf_dest->draw_dirty = false;
         }
+        surf_dest->draw_time = pg->draw_time;
         surf_dest->upload_pending = true;
         pg->draw_time++;
     }
@@ -2873,7 +2874,7 @@ static void pgraph_flush_draw(NV2AState *d)
     nv2a_dbg_handle_begin_end(&debug_info);
 #endif
 
-    uint32_t color_write = mask_alpha | mask_red | mask_green | mask_blue;
+    bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
     pgraph_set_surface_dirty(pg, color_write, depth_test || stencil_test);
 }
 
@@ -2908,7 +2909,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             pg->zeta_binding->draw_time = pg->draw_time;
         }
 
-        uint32_t color_write = mask_alpha | mask_red | mask_green | mask_blue;
         pgraph_set_surface_dirty(pg, color_write, depth_test || stencil_test);
 
         NV2A_GL_DGROUP_END();
