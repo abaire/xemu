@@ -21,6 +21,8 @@
 
 #include "nv2a_int.h"
 
+#include <math.h>
+
 #include "s3tc.h"
 #include "ui/xemu-settings.h"
 #include "qemu/fast-hash.h"
@@ -3099,7 +3101,19 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         unsigned int vp_width = pg->surface_binding_dim.width,
                      vp_height = pg->surface_binding_dim.height;
         pgraph_apply_scaling_factor(pg, &vp_width, &vp_height);
-        glViewport(0, 0, vp_width, vp_height);
+
+        // nv2a hardware rounds at 9/16 pixel, which must be accounted for
+        // during GL translation.
+
+// Too much to pass the pgraph tests, 5625 and 5626 also get pulled back a pixel.
+        float pixel_offset_x = 0.5625f * pg->surface_scale_factor;
+
+// Not enough to pass the pgraph tests
+        float pixel_offset_y = 0.4375f * pg->surface_scale_factor;
+
+        pixel_offset_y = 0.0f;
+
+        glViewportIndexedf(0, -pixel_offset_x, pixel_offset_y, vp_width + floorf(pixel_offset_x), vp_height + floorf(pixel_offset_y));
 
         /* Surface clip */
         /* FIXME: Consider moving to PSH w/ window clip */
@@ -4857,6 +4871,9 @@ static void pgraph_render_surface_to(NV2AState *d, SurfaceBinding *surface,
                        d->pgraph.s2t_rndr.surface_size_loc, width, height);
 
     glViewport(0, 0, width, height);
+//    float pixel_offset = 0.5625f;
+//    glViewportIndexedf(0, -pixel_offset, -pixel_offset, width + pixel_offset, height + pixel_offset);
+
     glColorMask(true, true, true, true);
     glDisable(GL_DITHER);
     glDisable(GL_SCISSOR_TEST);
