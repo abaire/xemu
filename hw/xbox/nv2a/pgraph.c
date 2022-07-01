@@ -5334,6 +5334,18 @@ const uint8_t *nv2a_get_dac_palette(void)
     return g_nv2a->puserdac.palette;
 }
 
+static void pgraph_download_overlapping_surfaces(NV2AState *d, hwaddr start, hwaddr end) {
+    SurfaceBinding *surface;
+    QTAILQ_FOREACH (surface, &d->pgraph.surfaces, entry) {
+        hwaddr surf_vram_end = surface->vram_addr + surface->size - 1;
+        bool overlapping = !(surface->vram_addr >= end ||
+                             start >= surf_vram_end);
+        if (overlapping) {
+            pgraph_download_surface_data_if_dirty(d, surface);
+        }
+    }
+}
+
 int nv2a_get_framebuffer_surface(void)
 {
     NV2AState *d = g_nv2a;
@@ -5343,8 +5355,23 @@ int nv2a_get_framebuffer_surface(void)
     // FIXME: Possible race condition with pgraph, consider lock
     uint32_t pline_offset, pstart_addr, pline_compare;
     d->vga.get_offsets(&d->vga, &pline_offset, &pstart_addr, &pline_compare);
-    SurfaceBinding *surface = pgraph_surface_get_within(d, d->pcrtc.start + pline_offset);
+    const hwaddr framebuffer = d->pcrtc.start + pline_offset;
+    SurfaceBinding *surface = pgraph_surface_get_within(d, framebuffer);
     if (surface == NULL || !surface->color) {
+        qemu_mutex_unlock(&d->pfifo.lock);
+        return 0;
+    }
+
+    if (surface->width != d->vga.last_scr_width
+        || surface->height != d->vga.last_scr_height
+        || surface->pitch != surface->width * surface->fmt.bytes_per_pixel) {
+
+        // Writeback any surfaces that overlap the framebuffer.
+        unsigned int length =
+            d->vga.last_scr_width * d->vga.last_scr_height * 4;
+        hwaddr framebuffer_end = framebuffer + length - 1;
+        pgraph_download_overlapping_surfaces(d, framebuffer, framebuffer_end);
+
         qemu_mutex_unlock(&d->pfifo.lock);
         return 0;
     }
@@ -6696,14 +6723,7 @@ static void pgraph_bind_textures(NV2AState *d)
 
             // Writeback any surfaces which this texture may index
             hwaddr tex_vram_end = texture_vram_offset + length - 1;
-            QTAILQ_FOREACH(surface, &d->pgraph.surfaces, entry) {
-                hwaddr surf_vram_end = surface->vram_addr + surface->size - 1;
-                bool overlapping = !(surface->vram_addr >= tex_vram_end
-                                     || texture_vram_offset >= surf_vram_end);
-                if (overlapping) {
-                    pgraph_download_surface_data_if_dirty(d, surface);
-                }
-            }
+            pgraph_download_overlapping_surfaces(d, texture_vram_offset, tex_vram_end);
         }
 
         TextureKey key;
