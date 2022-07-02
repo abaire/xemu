@@ -184,6 +184,7 @@ typedef struct TextureBinding {
     unsigned int addrp;
     uint32_t border_color;
     bool border_color_set;
+    uint32_t signed_channels;
 } TextureBinding;
 
 typedef struct TextureKey {

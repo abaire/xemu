@@ -435,9 +435,24 @@ static float convert_f24_to_float(uint32_t f24);
 static uint8_t cliptobyte(int x);
 static void convert_yuy2_to_rgb(const uint8_t *line, unsigned int ix, uint8_t *r, uint8_t *g, uint8_t* b);
 static void convert_uyvy_to_rgb(const uint8_t *line, unsigned int ix, uint8_t *r, uint8_t *g, uint8_t* b);
-static uint8_t* convert_texture_data(const TextureShape s, const uint8_t *data, const uint8_t *palette_data, unsigned int width, unsigned int height, unsigned int depth, unsigned int row_pitch, unsigned int slice_pitch);
-static void upload_gl_texture(GLenum gl_target, const TextureShape s, const uint8_t *texture_data, const uint8_t *palette_data);
-static TextureBinding* generate_texture(const TextureShape s, const uint8_t *texture_data, const uint8_t *palette_data);
+static uint8_t* convert_texture_data(const TextureShape s,
+                                     const uint8_t *data,
+                                     const uint8_t *palette_data,
+                                     unsigned int width,
+                                     unsigned int height,
+                                     unsigned int depth,
+                                     unsigned int row_pitch,
+                                     unsigned int slice_pitch,
+                                     unsigned int signed_channels);
+static void upload_gl_texture(GLenum gl_target,
+                              const TextureShape s,
+                              const uint8_t *texture_data,
+                              const uint8_t *palette_data,
+                              unsigned int signed_channels);
+static TextureBinding* generate_texture(const TextureShape s,
+                                        const uint8_t *texture_data,
+                                        const uint8_t *palette_data,
+                                        unsigned int signed_channels);
 static void texture_binding_destroy(gpointer data);
 static void texture_cache_entry_init(Lru *lru, LruNode *node, void *key);
 static void texture_cache_entry_post_evict(Lru *lru, LruNode *node);
@@ -6784,12 +6799,6 @@ static void pgraph_bind_textures(NV2AState *d)
         default: assert(false); break;
         }
 
-        /* Check for unsupported features */
-        if (filter & NV_PGRAPH_TEXFILTER0_ASIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_ASIGNED");
-        if (filter & NV_PGRAPH_TEXFILTER0_RSIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_RSIGNED");
-        if (filter & NV_PGRAPH_TEXFILTER0_GSIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_GSIGNED");
-        if (filter & NV_PGRAPH_TEXFILTER0_BSIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_BSIGNED");
-
         nv2a_profile_inc_counter(NV2A_PROF_TEX_BIND);
 
         hwaddr dma_len;
@@ -6977,7 +6986,14 @@ static void pgraph_bind_textures(NV2AState *d)
          * Check active surfaces to see if this texture was a render target
          */
         bool surf_to_tex = false;
-        if (surface != NULL) {
+
+        unsigned int signed_channels = filter &
+                (NV_PGRAPH_TEXFILTER0_ASIGNED
+                | NV_PGRAPH_TEXFILTER0_RSIGNED
+                | NV_PGRAPH_TEXFILTER0_GSIGNED
+                | NV_PGRAPH_TEXFILTER0_BSIGNED);
+
+        if (surface != NULL && !signed_channels) {
             surf_to_tex = pgraph_check_surface_to_texture_compatibility(
                     surface, &state);
 
@@ -7030,9 +7046,9 @@ static void pgraph_bind_textures(NV2AState *d)
         }
 
         // Free existing binding, if texture data has changed
-        bool must_destroy = (key_out->binding != NULL)
-                            && possibly_dirty
-                            && (key_out->binding->data_hash != tex_data_hash);
+        bool must_destroy = key_out->binding != NULL
+                            && ((possibly_dirty && key_out->binding->data_hash != tex_data_hash)
+                                || key_out->binding->signed_channels != signed_channels);
         if (must_destroy) {
             texture_binding_destroy(key_out->binding);
             key_out->binding = NULL;
@@ -7040,7 +7056,10 @@ static void pgraph_bind_textures(NV2AState *d)
 
         if (key_out->binding == NULL) {
             // Must create the texture
-            key_out->binding = generate_texture(state, texture_data, palette_data);
+            key_out->binding = generate_texture(state,
+                                                texture_data,
+                                                palette_data,
+                                                signed_channels);
             key_out->binding->data_hash = tex_data_hash;
             key_out->binding->scale = 1;
         } else {
@@ -7073,6 +7092,7 @@ static void pgraph_bind_textures(NV2AState *d)
                                  address,
                                  is_bordered,
                                  border_color);
+        binding->signed_channels = signed_channels;
 
         if (pg->texture_binding[i]) {
             if (pg->texture_binding[i]->gl_target != binding->gl_target) {
@@ -7396,6 +7416,50 @@ static void convert_uyvy_to_rgb(const uint8_t *line, unsigned int ix,
     *b = cliptobyte((298 * c + 516 * d + 128) >> 8);
 }
 
+static inline uint8_t signed_convert(uint8_t val)
+{
+    int signed_val = (int)val;
+    return (signed_val + 128) & 0xFF;
+}
+
+static void process_signed_texture_channels_R8G8B8A8(uint8_t *texture_data,
+                                                     unsigned int width,
+                                                     unsigned int height,
+                                                     unsigned int pitch,
+                                                     unsigned int signed_channels)
+{
+    if (!signed_channels) {
+        return;
+    }
+
+    uint8_t *row = texture_data;
+    for (unsigned int y = 0; y < height; ++y) {
+        uint8_t *component = row;
+        for (unsigned int x = 0; x < width; ++x) {
+            if (signed_channels & NV_PGRAPH_TEXFILTER0_BSIGNED) {
+                *component = signed_convert(*component);
+            }
+            ++component;
+
+            if (signed_channels & NV_PGRAPH_TEXFILTER0_GSIGNED) {
+                *component = signed_convert(*component);
+            }
+            ++component;
+
+            if (signed_channels & NV_PGRAPH_TEXFILTER0_RSIGNED) {
+                *component = signed_convert(*component);
+            }
+            ++component;
+
+            if (signed_channels & NV_PGRAPH_TEXFILTER0_ASIGNED) {
+                *component = signed_convert(*component);
+            }
+            ++component;
+        }
+        row += pitch;
+    }
+}
+
 static uint8_t* convert_texture_data(const TextureShape s,
                                      const uint8_t *data,
                                      const uint8_t *palette_data,
@@ -7403,7 +7467,8 @@ static uint8_t* convert_texture_data(const TextureShape s,
                                      unsigned int height,
                                      unsigned int depth,
                                      unsigned int row_pitch,
-                                     unsigned int slice_pitch)
+                                     unsigned int slice_pitch,
+                                     unsigned int signed_channels)
 {
     if (s.color_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_I8_A8R8G8B8) {
         uint8_t* converted_data = (uint8_t*)g_malloc(width * height * depth * 4);
@@ -7466,6 +7531,12 @@ static uint8_t* convert_texture_data(const TextureShape s,
         }
         return converted_data;
     } else {
+
+        // TODO: Support more signed formats
+        if (signed_channels) {
+            process_signed_texture_channels_R8G8B8A8(data, width, height, row_pitch, signed_channels);
+        }
+
         return NULL;
     }
 }
@@ -7473,7 +7544,8 @@ static uint8_t* convert_texture_data(const TextureShape s,
 static void upload_gl_texture(GLenum gl_target,
                               const TextureShape s,
                               const uint8_t *texture_data,
-                              const uint8_t *palette_data)
+                              const uint8_t *palette_data,
+                              unsigned int signed_channels)
 {
     ColorFormatInfo f = kelvin_color_format_map[s.color_format];
     nv2a_profile_inc_counter(NV2A_PROF_TEX_UPLOAD);
@@ -7501,7 +7573,8 @@ static void upload_gl_texture(GLenum gl_target,
                                                   palette_data,
                                                   adjusted_width,
                                                   adjusted_height, 1,
-                                                  adjusted_pitch, 0);
+                                                  adjusted_pitch, 0,
+                                                  signed_channels);
         glPixelStorei(GL_UNPACK_ROW_LENGTH,
                       converted ? 0 : adjusted_pitch / f.bytes_per_pixel);
         glTexImage2D(gl_target, 0, f.gl_internal_format,
@@ -7560,6 +7633,11 @@ static void upload_gl_texture(GLenum gl_target,
                     }
                 }
 
+                process_signed_texture_channels_R8G8B8A8(converted,
+                                                         width,
+                                                         height,
+                                                         physical_width * 4,
+                                                         signed_channels);
                 glTexImage2D(gl_target, level, GL_RGBA, tex_width, tex_height, 0,
                              GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, converted);
                 g_free(converted);
@@ -7583,7 +7661,8 @@ static void upload_gl_texture(GLenum gl_target,
                 uint8_t *converted = convert_texture_data(s, unswizzled,
                                                           palette_data,
                                                           width, height, 1,
-                                                          pitch, 0);
+                                                          pitch, 0,
+                                                          signed_channels);
                 uint8_t *pixel_data = converted ? converted : unswizzled;
                 unsigned int tex_width = width;
                 unsigned int tex_height = height;
@@ -7668,7 +7747,8 @@ static void upload_gl_texture(GLenum gl_target,
                 uint8_t *converted = convert_texture_data(s, unswizzled,
                                                           palette_data,
                                                           width, height, depth,
-                                                          row_pitch, slice_pitch);
+                                                          row_pitch, slice_pitch,
+                                                          signed_channels);
 
                 glTexImage3D(gl_target, level, f.gl_internal_format,
                              width, height, depth, 0,
@@ -7697,7 +7777,8 @@ static void upload_gl_texture(GLenum gl_target,
 
 static TextureBinding* generate_texture(const TextureShape s,
                                         const uint8_t *texture_data,
-                                        const uint8_t *palette_data)
+                                        const uint8_t *palette_data,
+                                        unsigned int signed_channels)
 {
     ColorFormatInfo f = kelvin_color_format_map[s.color_format];
 
@@ -7777,19 +7858,19 @@ static TextureBinding* generate_texture(const TextureShape s,
         length = (length + NV2A_CUBEMAP_FACE_ALIGNMENT - 1) & ~(NV2A_CUBEMAP_FACE_ALIGNMENT - 1);
 
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_X,
-                          s, texture_data + 0 * length, palette_data);
+                          s, texture_data + 0 * length, palette_data, signed_channels);
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-                          s, texture_data + 1 * length, palette_data);
+                          s, texture_data + 1 * length, palette_data, signed_channels);
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
-                          s, texture_data + 2 * length, palette_data);
+                          s, texture_data + 2 * length, palette_data, signed_channels);
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-                          s, texture_data + 3 * length, palette_data);
+                          s, texture_data + 3 * length, palette_data, signed_channels);
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
-                          s, texture_data + 4 * length, palette_data);
+                          s, texture_data + 4 * length, palette_data, signed_channels);
         upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
-                          s, texture_data + 5 * length, palette_data);
+                          s, texture_data + 5 * length, palette_data, signed_channels);
     } else {
-        upload_gl_texture(gl_target, s, texture_data, palette_data);
+        upload_gl_texture(gl_target, s, texture_data, palette_data, signed_channels);
     }
 
     /* Linear textures don't support mipmapping */
