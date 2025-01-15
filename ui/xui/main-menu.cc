@@ -1233,7 +1233,8 @@ void MainMenuSystemView::Draw()
     if (ChevronCombo(
             "System Memory", &g_config.sys.mem_limit,
             "64 MiB (Default)\0"
-            "128 MiB\0",
+            "128 MiB\0"
+            "256 MiB\0",
             "Increase to 128 MiB for debug or homebrew applications")) {
         m_dirty = true;
     }
