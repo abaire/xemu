@@ -52,6 +52,7 @@
 /*
  * Hardware is a PIC16LC
  * http://www.xbox-linux.org/wiki/PIC
+ * https://web.archive.org/web/20080406054740/http://www.xbox-linux.org/wiki/PIC
  */
 
 #define SMC_REG_VER                 0x01
@@ -75,6 +76,14 @@
 #define SMC_REG_FANSPEED            0x06
 #define SMC_REG_LEDMODE             0x07
 #define SMC_REG_LEDSEQ              0x08
+#define     SMC_REG_LEDSEQ_RED_0        (1 << 7)
+#define     SMC_REG_LEDSEQ_RED_1        (1 << 6)
+#define     SMC_REG_LEDSEQ_RED_2        (1 << 5)
+#define     SMC_REG_LEDSEQ_RED_3        (1 << 4)
+#define     SMC_REG_LEDSEQ_GREEN_0      (1 << 3)
+#define     SMC_REG_LEDSEQ_GREEN_1      (1 << 2)
+#define     SMC_REG_LEDSEQ_GREEN_2      (1 << 1)
+#define     SMC_REG_LEDSEQ_GREEN_3      (1 << 0)
 #define SMC_REG_CPUTEMP             0x09
 #define SMC_REG_BOARDTEMP           0x0a
 #define SMC_REG_TRAYEJECT           0x0c
@@ -106,6 +115,8 @@ typedef struct SMBusSMCDevice {
     uint8_t intstatus_reg;
     uint8_t scratch_reg;
     uint8_t error_reg;
+    uint8_t led_mode_reg;
+    uint8_t led_sequence_reg;
 } SMBusSMCDevice;
 
 static void smc_quick_cmd(SMBusDevice *dev, uint8_t read)
@@ -147,6 +158,14 @@ static int smc_write_data(SMBusDevice *dev, uint8_t *buf, uint8_t len)
 
     case SMC_REG_SCRATCH:
         smc->scratch_reg = buf[0];
+        break;
+
+    case SMC_REG_LEDMODE:
+        smc->led_mode_reg = buf[0];
+        break;
+
+    case SMC_REG_LEDSEQ:
+        smc->led_sequence_reg = buf[0];
         break;
 
     /* challenge response
