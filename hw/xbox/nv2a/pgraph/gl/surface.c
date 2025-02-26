@@ -94,9 +94,9 @@ void pgraph_gl_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
 {
     PGRAPHGLState *r = pg->gl_renderer_state;
 
-    NV2A_DPRINTF("pgraph_set_surface_dirty(%d, %d) -- %d %d\n",
-                 color, zeta,
-                 pgraph_color_write_enabled(pg), pgraph_zeta_write_enabled(pg));
+//    NV2A_DPRINTF("pgraph_set_surface_dirty(%d, %d) -- %d %d\n",
+//                 color, zeta,
+//                 pgraph_color_write_enabled(pg), pgraph_zeta_write_enabled(pg));
     /* FIXME: Does this apply to CLEARs too? */
     color = color && pgraph_color_write_enabled(pg);
     zeta = zeta && pgraph_zeta_write_enabled(pg);
