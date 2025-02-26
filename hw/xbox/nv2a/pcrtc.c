@@ -47,6 +47,8 @@ uint64_t pcrtc_read(void *opaque, hwaddr addr, unsigned int size)
     return r;
 }
 
+static int consecutive_debug_tags = 0;
+
 void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
@@ -63,6 +65,15 @@ void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         nv2a_update_irq(d);
         break;
     case NV_PCRTC_START:
+        if (val == 0xEAFFFEA) {
+            ++consecutive_debug_tags;
+            return;
+        }
+        if (consecutive_debug_tags) {
+            printf("!!! DEBUG TAG %d\n", consecutive_debug_tags);
+            consecutive_debug_tags = 0;
+        }
+
         val &= 0x07FFFFFF;
         // assert(val < memory_region_size(d->vram));
         d->pcrtc.start = val;

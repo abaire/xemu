@@ -1876,8 +1876,8 @@ static void bind_inline_vertex_buffer(PGRAPHState *pg, VkDeviceSize offset)
 
 void pgraph_vk_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
 {
-    NV2A_DPRINTF("pgraph_set_surface_dirty(%d, %d) -- %d %d\n", color, zeta,
-                 pgraph_color_write_enabled(pg), pgraph_zeta_write_enabled(pg));
+//    NV2A_DPRINTF("pgraph_set_surface_dirty(%d, %d) -- %d %d\n", color, zeta,
+//                 pgraph_color_write_enabled(pg), pgraph_zeta_write_enabled(pg));
 
     PGRAPHVkState *r = pg->vk_renderer_state;
 

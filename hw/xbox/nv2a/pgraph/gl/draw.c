@@ -29,7 +29,7 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
-    NV2A_DPRINTF("---------PRE CLEAR ------\n");
+//    NV2A_DPRINTF("---------PRE CLEAR ------\n");
     pg->clearing = true;
 
     GLbitfield gl_mask = 0;
@@ -83,18 +83,18 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     unsigned int ymax =
         GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY), NV_PGRAPH_CLEARRECTY_YMAX);
 
-    NV2A_DPRINTF(
-        "------------------CLEAR 0x%x %d,%d - %d,%d  %x---------------\n",
-        parameter, xmin, ymin, xmax, ymax,
-        d->pgraph.regs_[NV_PGRAPH_COLORCLEARVALUE]);
+//    NV2A_DPRINTF(
+//        "------------------CLEAR 0x%x %d,%d - %d,%d  %x---------------\n",
+//        parameter, xmin, ymin, xmax, ymax,
+//        d->pgraph.regs_[NV_PGRAPH_COLORCLEARVALUE]);
 
     unsigned int scissor_width = xmax - xmin + 1,
                  scissor_height = ymax - ymin + 1;
     pgraph_apply_anti_aliasing_factor(pg, &xmin, &ymin);
     pgraph_apply_anti_aliasing_factor(pg, &scissor_width, &scissor_height);
 
-    NV2A_DPRINTF("Translated clear rect to %d,%d - %d,%d\n", xmin, ymin,
-                 xmin + scissor_width - 1, ymin + scissor_height - 1);
+//    NV2A_DPRINTF("Translated clear rect to %d,%d - %d,%d\n", xmin, ymin,
+//                 xmin + scissor_width - 1, ymin + scissor_height - 1);
 
     bool full_clear = !xmin && !ymin &&
                       scissor_width >= pg->surface_binding_dim.width &&
