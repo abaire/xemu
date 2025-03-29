@@ -349,12 +349,12 @@ GLSL_DEFINE(materialEmissionColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_CM_COL) ".xyz
                 "  if (nDotVP == 0.0) {\n"
                 "    pf = 0.0;\n"
                 "  } else {\n"
-                "    pf = pow(nDotHV, /* specular(l, m, n, l1, m1, n1) */ 0.001);\n"
+                "    pf = pow(nDotHV, %f);\n"
                 "  }\n"
                 "  vec3 lightAmbient = lightAmbientColor(%d) * attenuation;\n"
                 "  vec3 lightDiffuse = lightDiffuseColor(%d) * attenuation * nDotVP;\n"
                 "  vec3 lightSpecular = lightSpecularColor(%d) * pf;\n",
-                i, i, i);
+                state->specular_power, i, i, i);
 
             mstring_append(body,
                 "  oD0.xyz += lightAmbient;\n");
