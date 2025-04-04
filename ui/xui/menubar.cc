@@ -73,7 +73,13 @@ void ProcessKeyboardShortcuts(void)
 
 #ifdef CONFIG_RENDERDOC
     if (ImGui::IsKeyPressed(ImGuiKey_F10) && nv2a_dbg_renderdoc_available()) {
-        nv2a_dbg_renderdoc_capture_frames(1);
+        ImGuiIO& io = ImGui::GetIO();
+        int num_frames = io.KeyShift ? 5 : 1;
+        if (io.KeyCtrl) {
+            nv2a_dbg_renderdoc_trace_frames(num_frames);
+        } else {
+            nv2a_dbg_renderdoc_capture_frames(num_frames);
+        }
     }
 #endif
 }
