@@ -250,7 +250,7 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
             break;
         }
 
-        mstring_append(body, "  oFog = FixNaN(fogFactor, xyzw);\n");
+        mstring_append(body, "  oFog = vec4(1.0);\n // FixNaN(fogFactor, xyzw);\n");
     } else {
         /* FIXME: Is the fog still calculated / passed somehow?!
          */
