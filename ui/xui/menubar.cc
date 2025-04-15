@@ -29,6 +29,10 @@
 #include "update.hh"
 #include "../xemu-os-utils.h"
 
+extern "C" {
+#include "trace/control.h"
+}
+
 extern float g_main_menu_height; // FIXME
 
 #ifdef CONFIG_RENDERDOC
@@ -71,9 +75,23 @@ void ProcessKeyboardShortcuts(void)
         ActionScreenshot();
     }
 
+    if (ImGui::IsKeyPressed(ImGuiKey_F9)) {
+        // TODO: Look up current state of nv2a traces and init this var.
+        static bool pgraph_trace_state = false;
+        pgraph_trace_state = !pgraph_trace_state;
+        static const char *nv2a_pgraph_enable = "nv2a_pgraph_*";
+        static const char *nv2a_pgraph_disable = "-nv2a_pgraph_*";
+        trace_enable_events(pgraph_trace_state ? nv2a_pgraph_enable :
+                                                 nv2a_pgraph_disable);
+    }
+
 #ifdef CONFIG_RENDERDOC
     if (ImGui::IsKeyPressed(ImGuiKey_F10) && nv2a_dbg_renderdoc_available()) {
         nv2a_dbg_renderdoc_capture_frames(1);
+    }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F11) && nv2a_dbg_renderdoc_available()) {
+        nv2a_dbg_renderdoc_trace_frames(1);
     }
 #endif
 }
