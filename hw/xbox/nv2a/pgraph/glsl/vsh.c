@@ -139,11 +139,7 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
         "#define FixNaN(src, mask) _FixNaN(_in(src)).mask\n"
         "vec4 _FixNaN(vec4 src)\n"
         "{\n"
-        "  bvec4 nans = isnan(src);\n"
-        "  if (!any(nans)) {\n"
-        "    return src;\n"
-        "  }\n"
-        "  return mix(src, sign(floatBitsToInt(src)), nans);\n"
+        "  return mix(src, (sign(src) + 1.0) * 0.5, isnan(src));\n"
         "}\n");
 
     mstring_append(header, "\n");
