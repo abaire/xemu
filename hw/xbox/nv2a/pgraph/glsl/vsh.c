@@ -128,6 +128,20 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
             }
         }
     }
+
+    mstring_append(header,
+        "/* Converts the input to vec4, pads with last component */\n"
+        "vec4 _in(float v) { return vec4(v); }\n"
+        "vec4 _in(vec2 v) { return v.xyyy; }\n"
+        "vec4 _in(vec3 v) { return v.xyzz; }\n"
+        "vec4 _in(vec4 v) { return v.xyzw; }\n"
+        "\n"
+        "#define FixNaN(src, mask) _FixNaN(_in(src)).mask\n"
+        "vec4 _FixNaN(vec4 src)\n"
+        "{\n"
+        "  return mix(src, (sign(floatBitsToInt(src)) + 1.0) * 0.5, isnan(src));\n"
+        "}\n");
+
     mstring_append(header, "\n");
 
     MString *body = mstring_from_str("void main() {\n");
@@ -232,11 +246,11 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
             break;
         }
 
-        mstring_append(body, "  oFog.xyzw = vec4(fogFactor);\n");
+        mstring_append(body, "  oFog = FixNaN(fogFactor, xyzw);\n");
     } else {
         /* FIXME: Is the fog still calculated / passed somehow?!
          */
-        mstring_append(body, "  oFog.xyzw = vec4(1.0);\n");
+        mstring_append(body, "  oFog = vec4(1.0);\n");
     }
 
     /* Set outputs */
@@ -256,6 +270,13 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
                        "  vtxD1 = clamp(oD1, 0.0, 1.0);\n"
                        "  vtxB1 = clamp(oB1, 0.0, 1.0);\n"
         );
+
+        if (state->ignore_specular_alpha) {
+            mstring_append(body,
+                           "  vtxD1.w = 1.0;\n"
+                           "  vtxB1.w = 1.0;\n"
+            );
+        }
     } else {
         mstring_append(body,
                        "  vtxD1 = vec4(0.0, 0.0, 0.0, 1.0);\n"
