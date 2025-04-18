@@ -128,6 +128,20 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
             }
         }
     }
+
+    mstring_append(header,
+        "/* Converts the input to vec4, pads with last component */\n"
+        "vec4 _in(float v) { return vec4(v); }\n"
+        "vec4 _in(vec2 v) { return v.xyyy; }\n"
+        "vec4 _in(vec3 v) { return v.xyzz; }\n"
+        "vec4 _in(vec4 v) { return v.xyzw; }\n"
+        "\n"
+        "#define FixNaN(src, mask) _FixNaN(_in(src)).mask\n"
+        "vec4 _FixNaN(vec4 src)\n"
+        "{\n"
+        "  return mix(src, (sign(floatBitsToInt(src)) + 1.0) * 0.5, isnan(src));\n"
+        "}\n");
+
     mstring_append(header, "\n");
 
     MString *body = mstring_from_str("void main() {\n");
