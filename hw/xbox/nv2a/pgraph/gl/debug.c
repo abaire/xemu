@@ -29,6 +29,8 @@
 #include <assert.h>
 
 #ifdef CONFIG_RENDERDOC
+#include "trace/control.h"
+
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include "thirdparty/renderdoc_app.h"
 #endif
@@ -43,6 +45,97 @@
 
 static bool has_GL_GREMEDY_frame_terminator = false;
 static bool has_GL_KHR_debug = false;
+
+#ifdef STREAM_GL_DEBUG_MESSAGES
+
+static const char *gl_debug_type_names[] = {
+        "ERROR",
+        "DEPRECATED",
+        "UNDEFINED",
+        "PORTABILITY",
+        "PERFORMANCE",
+        "MARKER",
+        "PUSH_GROUP",
+        "POP_GROUP",
+        "OTHER",
+};
+
+static const char *gl_debug_severity_names[] = {
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "NOTIFICATION",
+};
+
+static void APIENTRY print_gl_debug_message(GLenum /*source*/, GLenum type,
+                                            GLuint id, GLenum severity,
+                                            GLsizei length,
+                                            const GLchar *message,
+                                            const void *userParam)
+{
+    const char *type_name = "<UNKNOWN>";
+    const char *severity_name = "<UNKNOWN>";
+
+    if (type != GL_DEBUG_TYPE_ERROR) {
+        return;
+    }
+
+    switch (type) {
+        default:
+            break;
+        case GL_DEBUG_TYPE_ERROR:
+            type_name = gl_debug_type_names[0];
+            break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+            type_name = gl_debug_type_names[1];
+            break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+            type_name = gl_debug_type_names[2];
+            break;
+        case GL_DEBUG_TYPE_PORTABILITY:
+            type_name = gl_debug_type_names[3];
+            break;
+        case GL_DEBUG_TYPE_PERFORMANCE:
+            type_name = gl_debug_type_names[4];
+            break;
+        case GL_DEBUG_TYPE_MARKER:
+            type_name = gl_debug_type_names[5];
+            break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:
+            type_name = gl_debug_type_names[6];
+            break;
+        case GL_DEBUG_TYPE_POP_GROUP:
+            type_name = gl_debug_type_names[7];
+            break;
+        case GL_DEBUG_TYPE_OTHER:
+            type_name = gl_debug_type_names[8];
+            break;
+    }
+
+    switch (severity) {
+        default:
+            break;
+        case GL_DEBUG_SEVERITY_HIGH:
+            severity_name = gl_debug_severity_names[0];
+            break;
+        case GL_DEBUG_SEVERITY_MEDIUM:
+            severity_name = gl_debug_severity_names[1];
+            break;
+        case GL_DEBUG_SEVERITY_LOW:
+            severity_name = gl_debug_severity_names[2];
+            break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION:
+            severity_name = gl_debug_severity_names[3];
+            break;
+    }
+
+    if (length < 0) {
+        fprintf(stderr,"GLDBG[%s][%s]> %s\n", type_name, severity_name, message);
+    } else {
+        fprintf(stderr,"GLDBG[%s][%s]> %*s\n", type_name, severity_name, length, message);
+    }
+}
+#endif
 
 void gl_debug_initialize(void)
 {
@@ -62,8 +155,12 @@ void gl_debug_initialize(void)
          * so skip the call for this platform.
          */
 #else
-       glEnable(GL_DEBUG_OUTPUT);
-       assert(glGetError() == GL_NO_ERROR);
+        glEnable(GL_DEBUG_OUTPUT);
+        assert(glGetError() == GL_NO_ERROR);
+#endif
+
+#ifdef STREAM_GL_DEBUG_MESSAGES
+        glDebugMessageCallback(print_gl_debug_message, NULL);
 #endif
     }
 
@@ -154,7 +251,8 @@ void gl_debug_frame_terminator(void)
         RENDERDOC_API_1_6_0 *rdoc_api = nv2a_dbg_renderdoc_get_api();
 
         if (rdoc_api->IsTargetControlConnected()) {
-            if (rdoc_api->IsFrameCapturing()) {
+            bool capturing = rdoc_api->IsFrameCapturing();
+            if (capturing && renderdoc_capture_frames == 0) {
                 rdoc_api->EndFrameCapture(NULL, NULL);
                 GLenum error = glGetError();
                 if (error != GL_NO_ERROR) {
@@ -162,14 +260,27 @@ void gl_debug_frame_terminator(void)
                             "Renderdoc EndFrameCapture triggered GL error 0x%X - ignoring\n",
                             error);
                 }
+
+                if (renderdoc_trace_frames) {
+                    trace_enable_events("-nv2a_pgraph_*");
+                    renderdoc_trace_frames = false;
+                }
+            }
+            if (renderdoc_trace_frames > 0) {
+                trace_enable_events("nv2a_pgraph_*");
             }
             if (renderdoc_capture_frames > 0) {
-                rdoc_api->StartFrameCapture(NULL, NULL);
-                GLenum error = glGetError();
-                if (error != GL_NO_ERROR) {
-                    fprintf(stderr,
-                            "Renderdoc StartFrameCapture triggered GL error 0x%X - ignoring\n",
-                            error);
+                if (!capturing) {
+                    if (renderdoc_trace_frames) {
+                        trace_enable_events("nv2a_pgraph_*");
+                    }
+                    rdoc_api->StartFrameCapture(NULL, NULL);
+                    GLenum error = glGetError();
+                    if (error != GL_NO_ERROR) {
+                        fprintf(stderr,
+                                "Renderdoc StartFrameCapture triggered GL error 0x%X - ignoring\n",
+                                error);
+                    }
                 }
                 --renderdoc_capture_frames;
             }
