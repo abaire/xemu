@@ -252,7 +252,7 @@ void gl_debug_frame_terminator(void)
 
         if (rdoc_api->IsTargetControlConnected()) {
             bool capturing = rdoc_api->IsFrameCapturing();
-            if (capturing && renderdoc_capture_frames == 1) {
+            if (capturing && renderdoc_capture_frames == 0) {
                 rdoc_api->EndFrameCapture(NULL, NULL);
                 GLenum error = glGetError();
                 if (error != GL_NO_ERROR) {

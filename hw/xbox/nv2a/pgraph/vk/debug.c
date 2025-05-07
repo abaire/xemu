@@ -49,7 +49,7 @@ void pgraph_vk_debug_frame_terminator(void)
         PGRAPHVkState *r = g_nv2a->pgraph.vk_renderer_state;
         if (rdoc_api->IsTargetControlConnected()) {
             bool capturing = rdoc_api->IsFrameCapturing();
-            if (capturing && renderdoc_capture_frames == 1) {
+            if (capturing && renderdoc_capture_frames == 0) {
                 rdoc_api->EndFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(r->instance), 0);
                 if (renderdoc_trace_frames) {
                     trace_enable_events("-nv2a_pgraph_*");
