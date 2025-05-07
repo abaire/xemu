@@ -28,9 +28,9 @@
 #include <stdarg.h>
 #include <assert.h>
 
+#ifdef CONFIG_RENDERDOC
 #include "trace/control.h"
 
-#ifdef CONFIG_RENDERDOC
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include "thirdparty/renderdoc_app.h"
 #endif

@@ -25,6 +25,8 @@
 #endif
 
 #ifdef CONFIG_RENDERDOC
+#include "trace/control.h"
+
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include "thirdparty/renderdoc_app.h"
 #endif
@@ -53,7 +55,8 @@ void pgraph_vk_debug_frame_terminator(void)
                     trace_enable_events("-nv2a_pgraph_*");
                     renderdoc_trace_frames = false;
                 }
-            } else if (renderdoc_capture_frames > 0) {
+            }
+            if (renderdoc_capture_frames > 0) {
                 if (!capturing) {
                     if (renderdoc_trace_frames) {
                         trace_enable_events("nv2a_pgraph_*");
