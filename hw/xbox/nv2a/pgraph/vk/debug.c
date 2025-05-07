@@ -46,11 +46,20 @@ void pgraph_vk_debug_frame_terminator(void)
 
         PGRAPHVkState *r = g_nv2a->pgraph.vk_renderer_state;
         if (rdoc_api->IsTargetControlConnected()) {
-            if (rdoc_api->IsFrameCapturing()) {
+            bool capturing = rdoc_api->IsFrameCapturing();
+            if (capturing && renderdoc_capture_frames == 1) {
                 rdoc_api->EndFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(r->instance), 0);
-            }
-            if (renderdoc_capture_frames > 0) {
-                rdoc_api->StartFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(r->instance), 0);
+                if (renderdoc_trace_frames) {
+                    trace_enable_events("-nv2a_pgraph_*");
+                    renderdoc_trace_frames = false;
+                }
+            } else if (renderdoc_capture_frames > 0) {
+                if (!capturing) {
+                    if (renderdoc_trace_frames) {
+                        trace_enable_events("nv2a_pgraph_*");
+                    }
+                    rdoc_api->StartFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(r->instance), 0);
+                }
                 --renderdoc_capture_frames;
             }
         }
