@@ -352,6 +352,10 @@ void pgraph_destroy(PGRAPHState *pg)
     qemu_mutex_destroy(&pg->lock);
 }
 
+// DONOTSUBMIT: PROOF OF CONCEPT ONLY
+#include "gl/renderer.h"
+void wait_for_surface_download(SurfaceBinding *e);
+
 int nv2a_get_framebuffer_surface(void)
 {
     NV2AState *d = g_nv2a;
@@ -361,12 +365,52 @@ int nv2a_get_framebuffer_surface(void)
     qemu_mutex_lock(&pg->renderer_lock);
     assert(!pg->framebuffer_in_use);
     pg->framebuffer_in_use = true;
+
+    // Presumably in the case that there is no get_framebuffer_surface it's
+    // impossible for there to be an overlapping modified GL/VK surface and we
+    // could just bail early?
     if (pg->renderer->ops.get_framebuffer_surface) {
         s = pg->renderer->ops.get_framebuffer_surface(d);
     }
+
+    if (s) {
+        qemu_mutex_unlock(&pg->renderer_lock);
+        return s;
+    }
+
+    // If there is no framebuffer surface, it is possible that there are some GL
+    // surfaces that overlap the VGA region. Such surfaces must be downloaded
+    // before the default VGA texture is created.
+    //
+    // DONOTSUBMIT: I think we need to lock the pfifo/CPU threads during these
+    // downloads. Tomb Raider occasionally crashes when the menu is being
+    // animated, probably because this download ends up running concurrent with
+    // a guest CPU access.
+    VGADisplayParams vga_display_params;
+    d->vga.get_params(&d->vga, &vga_display_params);
+
+    hwaddr framebuffer_start = d->pcrtc.start + vga_display_params.line_offset;
+    if (!framebuffer_start) {
+        // Early exit during guest startup.
+        qemu_mutex_unlock(&pg->renderer_lock);
+        return 0;
+    }
+
+    DisplaySurface *display_surface = qemu_console_surface(d->vga.con);
+    hwaddr framebuffer_end = framebuffer_start + surface_height(display_surface) * surface_stride(display_surface);
+
+    SurfaceBinding *surface;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+        hwaddr surf_vram_end = surface->vram_addr + surface->size - 1;
+        if (surface->vram_addr > framebuffer_end || surf_vram_end < framebuffer_start) {
+            continue;
+        }
+        wait_for_surface_download(surface);
+    }
     qemu_mutex_unlock(&pg->renderer_lock);
 
-    return s;
+    return 0;
 }
 
 void nv2a_release_framebuffer_surface(void)

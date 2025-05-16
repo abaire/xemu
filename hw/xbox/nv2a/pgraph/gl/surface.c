@@ -417,7 +417,8 @@ bool pgraph_gl_check_surface_to_texture_compatibility(
     return false;
 }
 
-static void wait_for_surface_download(SurfaceBinding *e)
+// DONOTSUBMIT: visible for proof of concept only.
+void wait_for_surface_download(SurfaceBinding *e)
 {
     NV2AState *d = g_nv2a;
     PGRAPHState *pg = &d->pgraph;
