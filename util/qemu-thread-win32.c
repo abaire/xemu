@@ -17,7 +17,7 @@
 #include "qemu-thread-common.h"
 #include <process.h>
 
-static bool name_threads;
+static bool name_threads = true;
 
 typedef HRESULT (WINAPI *pSetThreadDescription) (HANDLE hThread,
                                                  PCWSTR lpThreadDescription);
