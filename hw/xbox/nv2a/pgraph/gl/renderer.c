@@ -128,7 +128,7 @@ static void pgraph_gl_process_pending(NV2AState *d)
                 d, r->download_dirty_surfaces_in_range_start,
                 r->download_dirty_surfaces_in_range_size);
             qatomic_set(&r->download_dirty_surfaces_in_range_pending, false);
-            qemu_event_set(&r->dirty_surfaces_download_complete);
+            qemu_event_set(&r->dirty_surfaces_in_range_download_complete);
         }
         if (qatomic_read(&d->pgraph.sync_pending)) {
             pgraph_gl_sync(d);
@@ -189,16 +189,18 @@ static void pgraph_gl_download_overlapping_surfaces_trigger(NV2AState *d,
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
+	qemu_mutex_lock(&d->pgraph.lock);
     r->download_dirty_surfaces_in_range_start = start;
     r->download_dirty_surfaces_in_range_size = size;
-    qemu_event_reset(&r->dirty_surfaces_download_complete);
+    qemu_event_reset(&r->dirty_surfaces_in_range_download_complete);
     qatomic_set(&r->download_dirty_surfaces_in_range_pending, true);
+	qemu_mutex_unlock(&d->pgraph.lock);
 }
 
 static void pgraph_gl_download_overlapping_surfaces_wait(NV2AState *d)
 {
-    qemu_event_wait(
-        &d->pgraph.gl_renderer_state->dirty_surfaces_download_complete);
+    qemu_event_wait(&d->pgraph.gl_renderer_state
+                         ->dirty_surfaces_in_range_download_complete);
 }
 
 static void pgraph_gl_pre_shutdown_trigger(NV2AState *d)

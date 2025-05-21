@@ -1394,6 +1394,7 @@ void pgraph_gl_init_surfaces(PGRAPHState *pg)
     r->downloads_pending = false;
     qemu_event_init(&r->downloads_complete, false);
     qemu_event_init(&r->dirty_surfaces_download_complete, false);
+    qemu_event_init(&r->dirty_surfaces_in_range_download_complete, false);
 
     init_render_to_texture(pg);
 }

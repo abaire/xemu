@@ -390,12 +390,13 @@ typedef struct PGRAPHVkState {
     SurfaceBinding *color_binding, *zeta_binding;
     bool downloads_pending;
     QemuEvent downloads_complete;
-
     bool download_dirty_surfaces_pending;
+    QemuEvent dirty_surfaces_download_complete; // common
+
     bool download_dirty_surfaces_in_range_pending;
     hwaddr download_dirty_surfaces_in_range_start;
     hwaddr download_dirty_surfaces_in_range_size;
-    QemuEvent dirty_surfaces_download_complete; // common
+    QemuEvent dirty_surfaces_in_range_download_complete;
 
     Lru texture_cache;
     TextureBinding *texture_cache_entries;

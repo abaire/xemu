@@ -189,12 +189,13 @@ typedef struct PGRAPHGLState {
     SurfaceBinding *color_binding, *zeta_binding;
     bool downloads_pending;
     QemuEvent downloads_complete;
+    QemuEvent dirty_surfaces_download_complete; // common
 
     bool download_dirty_surfaces_pending;
     bool download_dirty_surfaces_in_range_pending;
     hwaddr download_dirty_surfaces_in_range_start;
     hwaddr download_dirty_surfaces_in_range_size;
-    QemuEvent dirty_surfaces_download_complete; // common
+    QemuEvent dirty_surfaces_in_range_download_complete;
 
     TextureBinding *texture_binding[NV2A_MAX_TEXTURES];
     Lru texture_cache;
