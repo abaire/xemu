@@ -376,7 +376,6 @@ static void pgraph_download_vga_surfaces(NV2AState *d)
 
         trace_nv2a_pgraph_surface_download_vga_overlapping(framebuffer_start,
                                                            framebuffer_size);
-        bql_lock();
         qemu_mutex_lock(&d->pfifo.lock);
         qatomic_set(&d->pfifo.halt, true);
 
@@ -385,19 +384,15 @@ static void pgraph_download_vga_surfaces(NV2AState *d)
 
         pfifo_kick(d);
         qemu_mutex_unlock(&d->pfifo.lock);
-
-        bql_unlock();
     }
 
     pg->renderer->ops.download_overlapping_surfaces_wait(d);
 
     {
-        bql_lock();
         qemu_mutex_lock(&d->pfifo.lock);
         qatomic_set(&d->pfifo.halt, false);
         pfifo_kick(d);
         qemu_mutex_unlock(&d->pfifo.lock);
-        bql_unlock();
     }
 }
 
