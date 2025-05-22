@@ -283,8 +283,8 @@ void pgraph_gl_bind_textures(NV2AState *d)
             // FIXME: Restructure to support rendering surfaces to cubemap faces
 
             // Writeback any surfaces which this texture may index
-            pgraph_gl_download_surfaces_in_range_if_dirty(
-                d, texture_vram_offset, length);
+            hwaddr tex_vram_end = texture_vram_offset + length - 1;
+            pgraph_gl_download_overlapping_surfaces(d, texture_vram_offset, tex_vram_end);
         }
 
         TextureKey key;
