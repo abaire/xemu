@@ -90,9 +90,9 @@ static bool xb_console_gl_check_format(DisplayChangeListener *dcl,
     }
 }
 
-void xb_surface_gl_create_texture(DisplaySurface *surface);
-void xb_surface_gl_update_texture(DisplaySurface *surface, int x, int y, int w, int h);
-void xb_surface_gl_destroy_texture(DisplaySurface *surface);
+static void xb_surface_gl_create_texture(DisplaySurface *surface,
+                                         bool force_update);
+static void xb_surface_gl_destroy_texture(DisplaySurface *surface);
 
 static void sleep_ns(int64_t ns);
 
@@ -318,7 +318,8 @@ static void handle_keydown(SDL_Event *ev)
 {
     int win;
     struct sdl2_console *scon = get_scon_from_window(ev->key.windowID);
-    if (scon == NULL) return; 
+    if (scon == NULL)
+        return;
     int gui_key_modifier_pressed = get_mod_state();
     int gui_keysym = 0;
 
@@ -925,7 +926,8 @@ static void register_sdl1(void)
 
 type_init(register_sdl1);
 
-void xb_surface_gl_create_texture(DisplaySurface *surface)
+static void xb_surface_gl_create_texture(DisplaySurface *surface,
+                                         bool force_update)
 {
     assert(QEMU_IS_ALIGNED(surface_stride(surface), surface_bytes_per_pixel(surface)));
 
@@ -948,24 +950,37 @@ void xb_surface_gl_create_texture(DisplaySurface *surface)
         g_assert_not_reached();
     }
 
+    static void *last_surface_backing_data = NULL;
+    void *surface_backing_data = surface_data(surface);
+    bool upload_needed = !surface->texture || force_update ||
+                         surface_backing_data != last_surface_backing_data;
+
     if (!surface->texture) {
+        printf("New surface texture\n");
         glGenTextures(1, &surface->texture);
     }
     glBindTexture(GL_TEXTURE_2D, surface->texture);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT,
-                  surface_stride(surface) / surface_bytes_per_pixel(surface));
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                 surface_width(surface),
-                 surface_height(surface),
-                 0, surface->glformat, surface->gltype,
-                 surface_data(surface));
-    glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
+    if (upload_needed) {
+        printf("force_update: %d\n", force_update);
+        printf("last_surface_backing_data: 0x%X  surface_backing_data: 0x%X\n",
+               last_surface_backing_data, surface_backing_data);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT,
+                      surface_stride(surface) /
+                          surface_bytes_per_pixel(surface));
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, surface_width(surface),
+                     surface_height(surface), 0, surface->glformat,
+                     surface->gltype, surface_data(surface));
+        last_surface_backing_data = surface_backing_data;
+        glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
+    } else {
+        printf("Avoided unnecessary host framebuffer update\n");
+    }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 }
 
-void xb_surface_gl_destroy_texture(DisplaySurface *surface)
+static void xb_surface_gl_destroy_texture(DisplaySurface *surface)
 {
     if (!surface || !surface->texture) {
         return;
@@ -1036,10 +1051,11 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
      * the guest code isn't using HW accelerated rendering, but just blitting
      * to the framebuffer, fall back to the VGA path.
      */
-    GLuint tex = nv2a_get_framebuffer_surface();
+    GLuint tex = 0;
+    bool vga_dirty = false;
+    nv2a_get_framebuffer_surface(&tex, &vga_dirty);
     if (tex == 0) {
-        // FIXME: Don't upload if notdirty
-        xb_surface_gl_create_texture(scon->surface);
+        xb_surface_gl_create_texture(scon->surface, vga_dirty);
         scon->updates++;
         tex = scon->surface->texture;
         flip_required = true;
