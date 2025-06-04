@@ -123,7 +123,8 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
         assert(!(is_uniform && is_swizzled));
 
         if (is_uniform) {
-            mstring_append_fmt(header, "vec4 v%d = inlineValue[%d];\n", i,
+            mstring_append_fmt(header,
+                               "vec4 v%d = NaNToOne(inlineValue[%d]);\n", i,
                                num_uniform_attrs);
             num_uniform_attrs += 1;
         } else {
@@ -134,8 +135,8 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
                 mstring_append_fmt(header, "layout(location = %d) in vec4 v%d_sw;\n",
                                    i, i);
             } else {
-                mstring_append_fmt(header, "layout(location = %d) in vec4 v%d;\n",
-                                   i, i);
+                mstring_append_fmt(
+                    header, "layout(location = %d) in vec4 _v%d;\n", i, i);
             }
         }
     }
@@ -147,13 +148,13 @@ MString *pgraph_gen_vsh_glsl(const ShaderState *state, bool prefix_outputs)
     for (i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         if (state->compressed_attrs & (1 << i)) {
             mstring_append_fmt(
-                body, "vec4 v%d = decompress_11_11_10(v%d_cmp);\n", i, i);
+                body, "  vec4 v%d = decompress_11_11_10(v%d_cmp);\n", i, i);
+        } else if (state->swizzle_attrs & (1 << i)) {
+            mstring_append_fmt(body, "  vec4 v%d = NaNToOne(v%d_sw.bgra);\n", i,
+                               i);
+        } else if (!(state->uniform_attrs & (1 << i))) {
+            mstring_append_fmt(body, "  vec4 v%d = NaNToOne(_v%d);\n", i, i);
         }
-
-        if (state->swizzle_attrs & (1 << i)) {
-            mstring_append_fmt(body, "vec4 v%d = v%d_sw.bgra;\n", i, i);
-        }
-
     }
 
     if (state->fixed_function) {
