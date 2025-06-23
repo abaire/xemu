@@ -815,8 +815,7 @@ void pgraph_vk_bind_shaders(PGRAPHState *pg)
 
     if (check_shaders_dirty(pg)) {
         ShaderState new_state;
-        memset(&new_state, 0, sizeof(ShaderState));
-        new_state = pgraph_get_shader_state(pg);
+        pgraph_populate_shader_state(pg, &new_state);
         new_state.vulkan = true;
         new_state.psh.vulkan = true;
         new_state.use_push_constants_for_uniform_attrs =

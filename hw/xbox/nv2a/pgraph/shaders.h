@@ -111,6 +111,6 @@ typedef struct ShaderState {
 
 typedef struct PGRAPHState PGRAPHState;
 
-ShaderState pgraph_get_shader_state(PGRAPHState *pg);
+void pgraph_populate_shader_state(PGRAPHState *pg, ShaderState *state);
 
 #endif

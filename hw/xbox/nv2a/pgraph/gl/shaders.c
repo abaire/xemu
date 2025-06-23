@@ -1046,7 +1046,8 @@ void pgraph_gl_bind_shaders(PGRAPHState *pg)
     }
 
     ShaderBinding *old_binding = r->shader_binding;
-    ShaderState state = pgraph_get_shader_state(pg);
+    ShaderState state;
+    pgraph_populate_shader_state(pg, &state);
     assert(!state.vulkan);
 
     NV2A_GL_DGROUP_BEGIN("%s (VP: %s FFP: %s)", __func__,
