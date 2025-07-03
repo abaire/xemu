@@ -1487,7 +1487,7 @@
  * NV2A_MAX_BATCH_LENGTH_V2 is the previous limit, for migration.
  * FIXME: Remove NV2A_MAX_BATCH_LENGTH_V2 at some point in the future.
  */
-#define NV2A_MAX_BATCH_LENGTH 0x07FFFF
+#define NV2A_MAX_BATCH_LENGTH 0x42000
 #define NV2A_MAX_BATCH_LENGTH_V2 0x1FFFF
 #define NV2A_VERTEXSHADER_ATTRIBUTES 16
 #define NV2A_MAX_TEXTURES 4
