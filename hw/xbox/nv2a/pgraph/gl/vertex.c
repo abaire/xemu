@@ -223,8 +223,58 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
 
     nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_2);
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_array_buffer);
-    glBufferData(GL_ARRAY_BUFFER, index_count * vertex_size, pg->inline_array,
-                 GL_STREAM_DRAW);
+
+// DONOTSUBMIT - FOR TESTING ONLY
+#define MODE 0
+
+#if MODE == 0
+    // Baseline 0.8.84 behavior
+    glBufferData(GL_ARRAY_BUFFER, NV2A_MAX_BATCH_LENGTH * sizeof(uint32_t),
+                 NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
+                    pg->inline_array);
+#elif MODE == 1
+    // Alloc exactly what is needed
+    GLsizeiptr buffer_size = index_count * vertex_size;
+    glBufferData(GL_ARRAY_BUFFER, buffer_size,
+                 NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+#elif MODE == 2
+    // Alloc exactly what is needed and combine the copy into the alloc
+    GLsizeiptr buffer_size = index_count * vertex_size;
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+#elif MODE == 3
+    // Quantize the allocation with the 0.8.53 alloc size
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x20000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size,
+                 NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+#elif MODE == 4
+    // Quantize the allocation with the 0.8.53 alloc size, combine copy into alloc
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x20000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+#elif MODE == 5
+    // Quantize the allocation with the a smaller alloc size
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x2000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size,
+                 NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+#elif MODE == 6
+    // Quantize the allocation with the a smaller alloc size, combine copy into alloc
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x2000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+#elif MODE == 7
+    // Quantize the allocation with a larger alloc size
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x40000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size,
+                 NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+#elif MODE == 8
+    // Quantize the allocation with a larger alloc size, combine copy into alloc
+    GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x40000);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+#endif
+
     pgraph_gl_bind_vertex_attributes(d, 0, index_count-1, true, vertex_size,
                                   index_count-1);
 
