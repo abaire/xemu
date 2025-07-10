@@ -225,7 +225,7 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_array_buffer);
 
 // DONOTSUBMIT - FOR TESTING ONLY
-#define MODE 0
+#define MODE 6
 
 #if MODE == 0
     // Baseline 0.8.84 behavior
