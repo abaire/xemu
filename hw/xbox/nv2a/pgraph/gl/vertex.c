@@ -24,6 +24,9 @@
 #include "debug.h"
 #include "renderer.h"
 
+#define INLINE_ARRAY_GL_BUFFER_SIZE \
+    (NV2A_MAX_BATCH_LENGTH * sizeof(uint32_t) * 2)
+
 static void update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
                                  bool quick)
 {
@@ -46,8 +49,7 @@ static void update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
     size = end - addr;
     if (memory_region_test_and_clear_dirty(d->vram, addr, size,
                                            DIRTY_MEMORY_NV2A)) {
-        glBufferSubData(GL_ARRAY_BUFFER, addr, size,
-                        d->vram_ptr + addr);
+        glBufferSubData(GL_ARRAY_BUFFER, addr, size, d->vram_ptr + addr);
         nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_1);
     }
 }
@@ -58,13 +60,15 @@ void pgraph_gl_update_entire_memory_buffer(NV2AState *d)
     PGRAPHGLState *r = pg->gl_renderer_state;
 
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_memory_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, memory_region_size(d->vram), d->vram_ptr);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, memory_region_size(d->vram),
+                    d->vram_ptr);
 }
 
 void pgraph_gl_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
-                                   unsigned int max_element, bool inline_data,
-                                   unsigned int inline_stride,
-                                   unsigned int provoking_element)
+                                      unsigned int max_element,
+                                      bool inline_data,
+                                      unsigned int inline_stride,
+                                      unsigned int provoking_element)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
@@ -156,7 +160,7 @@ void pgraph_gl_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
             stride = attr->stride;
             start = attrib_data_addr + min_element * stride;
             update_memory_buffer(d, start, num_elements * stride,
-                                        updated_memory_buffer);
+                                 updated_memory_buffer);
             updated_memory_buffer = true;
         }
 
@@ -166,7 +170,8 @@ void pgraph_gl_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         const uint8_t *last_entry;
 
         if (inline_data) {
-            last_entry = (uint8_t*)pg->inline_array + attr->inline_array_offset;
+            last_entry =
+                (uint8_t *)pg->inline_array + attr->inline_array_offset;
         } else {
             last_entry = d->vram_ptr + start;
         }
@@ -195,7 +200,7 @@ void pgraph_gl_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
     NV2A_GL_DGROUP_END();
 }
 
-unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
+unsigned int pgraph_gl_bind_inline_array(NV2AState *d, GLRingBufferEntry **rb)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
@@ -210,14 +215,14 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
         /* FIXME: Double check */
         offset = ROUND_UP(offset, attr->size);
         attr->inline_array_offset = offset;
-        NV2A_DPRINTF("bind inline attribute %d size=%d, count=%d\n",
-            i, attr->size, attr->count);
+        NV2A_DPRINTF("bind inline attribute %d size=%d, count=%d\n", i,
+                     attr->size, attr->count);
         offset += attr->size * attr->count;
         offset = ROUND_UP(offset, attr->size);
     }
 
     unsigned int vertex_size = offset;
-    unsigned int index_count = pg->inline_array_length*4 / vertex_size;
+    unsigned int index_count = pg->inline_array_length * 4 / vertex_size;
 
     NV2A_DPRINTF("draw inline array %d, %d\n", vertex_size, index_count);
 
@@ -225,7 +230,7 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_array_buffer);
 
 // DONOTSUBMIT - FOR TESTING ONLY
-#define MODE 10
+#define MODE 12
 
 #if MODE == 0
     // Baseline 0.8.84 behavior
@@ -236,43 +241,49 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
 #elif MODE == 1
     // Alloc exactly what is needed
     GLsizeiptr buffer_size = index_count * vertex_size;
-    glBufferData(GL_ARRAY_BUFFER, buffer_size,
-                 NULL, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
+                    pg->inline_array);
 #elif MODE == 2
     // Alloc exactly what is needed and combine the copy into the alloc
     GLsizeiptr buffer_size = index_count * vertex_size;
-    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array,
+                 GL_STREAM_DRAW);
 #elif MODE == 3
     // Quantize the allocation with the 0.8.53 alloc size
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x20000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size,
-                 NULL, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
+                    pg->inline_array);
 #elif MODE == 4
-    // Quantize the allocation with the 0.8.53 alloc size, combine copy into alloc
+    // Quantize the allocation with the 0.8.53 alloc size, combine copy into
+    // alloc
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x20000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array,
+                 GL_STREAM_DRAW);
 #elif MODE == 5
     // Quantize the allocation with the a smaller alloc size
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x2000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size,
-                 NULL, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
+                    pg->inline_array);
 #elif MODE == 6
-    // Quantize the allocation with the a smaller alloc size, combine copy into alloc
+    // Quantize the allocation with the a smaller alloc size, combine copy into
+    // alloc
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x2000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array,
+                 GL_STREAM_DRAW);
 #elif MODE == 7
     // Quantize the allocation with a larger alloc size
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x40000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size,
-                 NULL, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, NULL, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
+                    pg->inline_array);
 #elif MODE == 8
     // Quantize the allocation with a larger alloc size, combine copy into alloc
     GLsizeiptr buffer_size = ROUND_UP(index_count * vertex_size, 0x40000);
-    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, buffer_size, pg->inline_array,
+                 GL_STREAM_DRAW);
 #elif MODE == 9
     glBufferData(GL_ARRAY_BUFFER, NV2A_MAX_BATCH_LENGTH * sizeof(uint32_t),
                  NULL, GL_STREAM_DRAW);
@@ -298,10 +309,68 @@ unsigned int pgraph_gl_bind_inline_array(NV2AState *d)
                  NULL, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size,
                     pg->inline_array);
+#elif MODE == 12
+    GLsizeiptr buffer_size = index_count * vertex_size;
+    GLsizeiptr alloc_size = ROUND_UP(buffer_size, 0x100);
+
+    if (r->mapped_inline_array_buffer_write_free_chunk_size < alloc_size) {
+        if (r->mapped_inline_array_buffer_write_offset + alloc_size >=
+            INLINE_ARRAY_GL_BUFFER_SIZE) {
+            r->mapped_inline_array_buffer_write_offset = 0;
+            r->mapped_inline_array_buffer_write_free_chunk_size = 0;
+        }
+
+        GLRingBufferEntry *fence, *next;
+        QTAILQ_FOREACH_SAFE (fence, &r->mapped_inline_array_buffer_fences,
+                             entry, next) {
+            if (fence->buffer_offset <
+                r->mapped_inline_array_buffer_write_offset) {
+                break;
+            }
+
+            int result =
+                glClientWaitSync(fence->fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+            if (result == GL_ALREADY_SIGNALED ||
+                result == GL_CONDITION_SATISFIED) {
+                glDeleteSync(fence->fence);
+                QTAILQ_REMOVE(&r->mapped_inline_array_buffer_fences, fence,
+                              entry);
+                r->mapped_inline_array_buffer_write_free_chunk_size +=
+                    fence->size;
+                g_free(fence);
+            } else {
+                printf("Draw not completed\n");
+                break;
+            }
+        }
+
+        if (!QTAILQ_LAST(&r->mapped_inline_array_buffer_fences)) {
+            r->mapped_inline_array_buffer_write_free_chunk_size = INLINE_ARRAY_GL_BUFFER_SIZE;
+        }
+
+        // Still not enough space available, block.
+        if (r->mapped_inline_array_buffer_write_free_chunk_size < alloc_size) {
+            printf("Inline array buffer overflow - TODO: Stall\n");
+            assert(!"TODO: HANDLE GPU BUFFER OVERFLOW");
+        }
+    }
+
+    *rb = g_malloc(sizeof(GLRingBufferEntry));
+    (*rb)->buffer_offset = r->mapped_inline_array_buffer_write_offset;
+    (*rb)->size = alloc_size;
+    QTAILQ_INSERT_TAIL(&r->mapped_inline_array_buffer_fences, *rb, entry);
+    memcpy(r->mapped_inline_array_buffer +
+               r->mapped_inline_array_buffer_write_offset,
+           pg->inline_array, buffer_size);
+    glFlushMappedBufferRange(GL_ARRAY_BUFFER, (*rb)->buffer_offset,
+                             buffer_size);
+    r->mapped_inline_array_buffer_write_offset += alloc_size;
+    r->mapped_inline_array_buffer_write_free_chunk_size -= alloc_size;
+
 #endif
 
-    pgraph_gl_bind_vertex_attributes(d, 0, index_count-1, true, vertex_size,
-                                  index_count-1);
+    pgraph_gl_bind_vertex_attributes(d, 0, index_count - 1, true, vertex_size,
+                                     index_count - 1);
 
     return index_count;
 }
@@ -319,7 +388,7 @@ static bool vertex_cache_entry_compare(Lru *lru, LruNode *node, const void *key)
     return memcmp(&vnode->key, key, sizeof(VertexKey));
 }
 
-static const size_t element_cache_size = 50*1024;
+static const size_t element_cache_size = 50 * 1024;
 
 void pgraph_gl_init_buffers(NV2AState *d)
 {
@@ -327,7 +396,8 @@ void pgraph_gl_init_buffers(NV2AState *d)
     PGRAPHGLState *r = pg->gl_renderer_state;
 
     lru_init(&r->element_cache);
-    r->element_cache_entries = g_malloc_n(element_cache_size, sizeof(VertexLruNode));
+    r->element_cache_entries =
+        g_malloc_n(element_cache_size, sizeof(VertexLruNode));
     assert(r->element_cache_entries != NULL);
     GLuint element_cache_buffers[element_cache_size];
     glGenBuffers(element_cache_size, element_cache_buffers);
@@ -347,11 +417,22 @@ void pgraph_gl_init_buffers(NV2AState *d)
     glGenBuffers(1, &r->gl_inline_array_buffer);
 
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_array_buffer);
+    glBufferData(GL_ARRAY_BUFFER, INLINE_ARRAY_GL_BUFFER_SIZE, NULL,
+                 GL_DYNAMIC_DRAW);
+
+    r->mapped_inline_array_buffer_write_offset = 0;
+    r->mapped_inline_array_buffer_write_free_chunk_size =
+        INLINE_ARRAY_GL_BUFFER_SIZE;
+    QTAILQ_INIT(&r->mapped_inline_array_buffer_fences);
+    r->mapped_inline_array_buffer =
+        glMapBufferRange(GL_ARRAY_BUFFER, 0, INLINE_ARRAY_GL_BUFFER_SIZE,
+                         GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT |
+                             GL_MAP_FLUSH_EXPLICIT_BIT);
 
     glGenBuffers(1, &r->gl_memory_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, r->gl_memory_buffer);
-    glBufferData(GL_ARRAY_BUFFER, memory_region_size(d->vram),
-                 NULL, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, memory_region_size(d->vram), NULL,
+                 GL_DYNAMIC_DRAW);
 
     glGenVertexArrays(1, &r->gl_vertex_array);
     glBindVertexArray(r->gl_vertex_array);
@@ -376,8 +457,22 @@ void pgraph_gl_finalize_buffers(PGRAPHState *pg)
     glDeleteBuffers(NV2A_VERTEXSHADER_ATTRIBUTES, r->gl_inline_buffer);
     memset(r->gl_inline_buffer, 0, sizeof(r->gl_inline_buffer));
 
+    GLRingBufferEntry *fence, *next;
+    QTAILQ_FOREACH_SAFE (fence, &r->mapped_inline_array_buffer_fences, entry,
+                         next) {
+        int result = glClientWaitSync(fence->fence, GL_SYNC_FLUSH_COMMANDS_BIT,
+                                      (GLuint64)(5000000000));
+        assert(result == GL_CONDITION_SATISFIED ||
+               result == GL_ALREADY_SIGNALED);
+        glDeleteSync(fence->fence);
+        QTAILQ_REMOVE(&r->mapped_inline_array_buffer_fences, fence, entry);
+        g_free(fence);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_array_buffer);
+    glUnmapBuffer(GL_ARRAY_BUFFER);
     glDeleteBuffers(1, &r->gl_inline_array_buffer);
     r->gl_inline_array_buffer = 0;
+    r->mapped_inline_array_buffer = NULL;
 
     glDeleteBuffers(1, &r->gl_memory_buffer);
     r->gl_memory_buffer = 0;

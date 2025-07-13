@@ -127,7 +127,7 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     if (r->zeta_binding) {
         r->zeta_binding->cleared = full_clear && write_zeta;
     }
-    
+
     pg->clearing = false;
 }
 
@@ -510,9 +510,11 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_GL_DPRINTF(false, "Inline Array");
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
 
-        unsigned int index_count = pgraph_gl_bind_inline_array(d);
+        GLRingBufferEntry *ring_buffer_entry;
+        unsigned int index_count = pgraph_gl_bind_inline_array(d, &ring_buffer_entry);
         glDrawArrays(r->shader_binding->gl_primitive_mode,
                      0, index_count);
+        ring_buffer_entry->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     } else {
         NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
