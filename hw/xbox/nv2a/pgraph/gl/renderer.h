@@ -166,6 +166,13 @@ typedef struct QueryReport {
     GLuint *queries;
 } QueryReport;
 
+typedef struct GLRingBufferEntry {
+    QTAILQ_ENTRY(GLRingBufferEntry) entry;
+    GLsync fence;
+    GLuint buffer_offset;
+    GLuint size;
+} GLRingBufferEntry;
+
 typedef struct PGRAPHGLState {
     GLuint gl_framebuffer;
     GLuint gl_display_buffer;
@@ -177,7 +184,14 @@ typedef struct PGRAPHGLState {
 
     Lru element_cache;
     VertexLruNode *element_cache_entries;
+
     GLuint gl_inline_array_buffer;
+    QTAILQ_HEAD(, GLRingBufferEntry) mapped_inline_array_buffer_fences;
+    void *mapped_inline_array_buffer;
+    GLuint mapped_inline_array_buffer_write_offset;
+    GLuint mapped_inline_array_buffer_write_free_chunk_size;
+    GLuint inline_array_write_offset;
+
     GLuint gl_memory_buffer;
     GLuint gl_vertex_array;
     GLuint gl_inline_buffer[NV2A_VERTEXSHADER_ATTRIBUTES];
@@ -238,7 +252,7 @@ typedef struct PGRAPHGLState {
 extern GloContext *g_nv2a_context_render;
 extern GloContext *g_nv2a_context_display;
 
-unsigned int pgraph_gl_bind_inline_array(NV2AState *d);
+unsigned int pgraph_gl_bind_inline_array(NV2AState *d, GLRingBufferEntry **rb);
 void pgraph_gl_bind_shaders(PGRAPHState *pg);
 void pgraph_gl_bind_textures(NV2AState *d);
 void pgraph_gl_bind_vertex_attributes(NV2AState *d, unsigned int min_element, unsigned int max_element, bool inline_data, unsigned int inline_stride, unsigned int provoking_element);
