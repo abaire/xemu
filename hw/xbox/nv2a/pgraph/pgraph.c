@@ -652,19 +652,31 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4, ctx_3);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4, ctx_4);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4, ctx_5);
+
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1, ctx_1);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2, ctx_2);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3, ctx_3);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4, ctx_4);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5, ctx_5);
     }
 
-    // is this right?
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE1 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE2 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4));
+    // is this right? - it doesn't seem like it; Steel Battalion explicitly
+    // disables CTX_SWITCH1 before sending some invalid commands and does not
+    // modify CTX_CACHE1
+#define LOAD_CTX_CACHE(index) \
+    if (PG_GET_MASK(NV_PGRAPH_CTX_SWITCH ## index, \
+                    NV_PGRAPH_CTX_SWITCH1_GRCLASS)) { \
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH ## index, \
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE ## index + subchannel * 4)); \
+    }
+
+    LOAD_CTX_CACHE(1)
+    LOAD_CTX_CACHE(2)
+    LOAD_CTX_CACHE(3)
+    LOAD_CTX_CACHE(4)
+    LOAD_CTX_CACHE(5)
+
+#undef LOAD_CTX_CACHE
 
     uint32_t graphics_class = PG_GET_MASK(NV_PGRAPH_CTX_SWITCH1,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
