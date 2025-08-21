@@ -162,6 +162,13 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
     default:
+        // DONOTSUBMIT
+        if (addr == NV_PGRAPH_CTX_SWITCH1) {
+            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH1 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_CACHE1) {
+            fprintf(stderr, "NV_PGRAPH_CTX_CACHE1 write 0x{%X}\n", val);
+        }
+
         pgraph_reg_w(pg, addr, val);
         break;
     }
@@ -658,6 +665,9 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3, ctx_3);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4, ctx_4);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5, ctx_5);
+
+        // DONOTSUBMIT
+        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE1 0x%X\n", ctx_1);
     }
 
     // is this right? - it doesn't seem like it; Steel Battalion explicitly
