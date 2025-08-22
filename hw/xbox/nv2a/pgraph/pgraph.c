@@ -167,6 +167,22 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
             fprintf(stderr, "NV_PGRAPH_CTX_SWITCH1 write 0x{%X}\n", val);
         } else if (addr == NV_PGRAPH_CTX_CACHE1) {
             fprintf(stderr, "NV_PGRAPH_CTX_CACHE1 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_SWITCH2) {
+            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH2 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_CACHE2) {
+            fprintf(stderr, "NV_PGRAPH_CTX_CACHE2 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_SWITCH3) {
+            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH3 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_CACHE3) {
+            fprintf(stderr, "NV_PGRAPH_CTX_CACHE3 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_SWITCH4) {
+            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH4 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_CACHE4) {
+            fprintf(stderr, "NV_PGRAPH_CTX_CACHE4 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_SWITCH5) {
+            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH5 write 0x{%X}\n", val);
+        } else if (addr == NV_PGRAPH_CTX_CACHE5) {
+            fprintf(stderr, "NV_PGRAPH_CTX_CACHE5 write 0x{%X}\n", val);
         }
 
         pgraph_reg_w(pg, addr, val);
@@ -668,6 +684,10 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
         // DONOTSUBMIT
         fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE1 0x%X\n", ctx_1);
+        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE2 0x%X\n", ctx_2);
+        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE3 0x%X\n", ctx_3);
+        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE4 0x%X\n", ctx_4);
+        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE5 0x%X\n", ctx_5);
     }
 
     // is this right? - it doesn't seem like it; Steel Battalion explicitly
