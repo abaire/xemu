@@ -308,17 +308,17 @@ static inline uint32_t pgraph_reg_r(PGRAPHState *pg, unsigned int r)
 
 static inline void pgraph_reg_w(PGRAPHState *pg, unsigned int r, uint32_t v)
 {
-    if (r == NV_PGRAPH_CTX_SWITCH1) {
-        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH1: 0x%X\n", v);
-    } else if (r == NV_PGRAPH_CTX_SWITCH2) {
-        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH2: 0x%X\n", v);
-    } else if (r == NV_PGRAPH_CTX_SWITCH3) {
-        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH3: 0x%X\n", v);
-    } else if (r == NV_PGRAPH_CTX_SWITCH4) {
-        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH4: 0x%X\n", v);
-    } else if (r == NV_PGRAPH_CTX_SWITCH5) {
-        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH5: 0x%X\n", v);
-    }
+//    if (r == NV_PGRAPH_CTX_SWITCH1) {
+//        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH1: 0x%X\n", v);
+//    } else if (r == NV_PGRAPH_CTX_SWITCH2) {
+//        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH2: 0x%X\n", v);
+//    } else if (r == NV_PGRAPH_CTX_SWITCH3) {
+//        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH3: 0x%X\n", v);
+//    } else if (r == NV_PGRAPH_CTX_SWITCH4) {
+//        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH4: 0x%X\n", v);
+//    } else if (r == NV_PGRAPH_CTX_SWITCH5) {
+//        fprintf(stderr, "pgraph_reg_w NV_PGRAPH_CTX_SWITCH5: 0x%X\n", v);
+//    }
 
     assert(r % 4 == 0);
     if (pg->regs_[r] != v) {
