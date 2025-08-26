@@ -183,6 +183,8 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
             fprintf(stderr, "NV_PGRAPH_CTX_SWITCH5 write 0x{%X}\n", val);
         } else if (addr == NV_PGRAPH_CTX_CACHE5) {
             fprintf(stderr, "NV_PGRAPH_CTX_CACHE5 write 0x{%X}\n", val);
+        } else  if (addr != 0x720) {
+            fprintf(stderr, "Write 0x%X to pgraph reg 0x%X\n", val, addr);
         }
 
         pgraph_reg_w(pg, addr, val);
