@@ -77,7 +77,9 @@ void pgraph_gl_init_display(NV2AState *d)
         "                           greaterThan(screenCoord, output_region.zw));\n"
         "        if (!any(clip) && (!pvideo_color_key_enable || out_Color.rgb == pvideo_color_key)) {\n"
         "            vec2 out_xy = (screenCoord - pvideo_pos.xy) * pvideo_scale.z;\n"
-        "            vec2 in_st = (pvideo_in_pos + out_xy * pvideo_scale.xy) / textureSize(pvideo_tex, 0);\n"
+        "            vec2 in_pos = vec2(pvideo_in_pos.x, display_size.y - pvideo_in_pos.y);\n"
+        "            //vec2 in_pos = pvideo_in_pos;\n"
+        "            vec2 in_st = (in_pos + out_xy * pvideo_scale.xy) / textureSize(pvideo_tex, 0);\n"
         "            in_st.y *= -1.0;\n"
         "            out_Color.rgba = texture(pvideo_tex, in_st);\n"
         "        }\n"
@@ -263,6 +265,8 @@ static void render_display_pvideo_overlay(NV2AState *d)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // T clamping is handled in the shader since the geometry is inverted.
     uint8_t *tex_rgba = convert_texture_data__CR8YB8CB8YA8(
         d->vram_ptr + base + offset, in_width, in_height, in_pitch);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, in_width, in_height, 0, GL_RGBA,
