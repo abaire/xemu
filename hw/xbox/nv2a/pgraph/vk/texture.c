@@ -51,6 +51,15 @@ static VkSamplerAddressMode lookup_texture_address_mode(int idx)
     return pgraph_texture_addr_vk_map[idx];
 }
 
+static inline float convert_lod_bias(uint32_t lod_bias)
+{
+    int sign_extended_bias = lod_bias;
+    if (lod_bias & (1 << 12)) {
+        sign_extended_bias |= ~NV_PGRAPH_TEXFILTER0_MIPMAP_LOD_BIAS;
+    }
+    return (float)sign_extended_bias / 256.f;
+}
+
 // FIXME: Move to common
 // FIXME: We can shrink the size of this structure
 // FIXME: Use simple allocator
@@ -1101,6 +1110,13 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + texture_idx * 4);
     bool is_indexed = (state.color_format ==
             NV097_SET_TEXTURE_FORMAT_COLOR_SZ_I8_A8R8G8B8);
+    uint32_t xbox_max_anisotropy =
+        1 << (GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + texture_idx*4),
+                       NV_PGRAPH_TEXCTL0_0_MAX_ANISOTROPY));
+    uint32_t max_anisotropy =
+        xbox_max_anisotropy <= r->device_props.limits.maxSamplerAnisotropy ?
+            xbox_max_anisotropy :
+            r->device_props.limits.maxSamplerAnisotropy;
 
     TextureKey key;
     memset(&key, 0, sizeof(key));
@@ -1346,9 +1362,8 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
             GET_MASK(address, NV_PGRAPH_TEXADDRESS0_ADDRV)),
         .addressModeW = (state.dimensionality > 2) ? lookup_texture_address_mode(
             GET_MASK(address, NV_PGRAPH_TEXADDRESS0_ADDRP)) : 0,
-        .anisotropyEnable = VK_FALSE,
-        // .anisotropyEnable = VK_TRUE,
-        // .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+        .anisotropyEnable = max_anisotropy > 1,
+        .maxAnisotropy = max_anisotropy,
         .borderColor = vk_border_color,
         .compareEnable = VK_FALSE,
         .compareOp = VK_COMPARE_OP_ALWAYS,
@@ -1356,7 +1371,8 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
                                        VK_SAMPLER_MIPMAP_MODE_LINEAR,
         .minLod = mipmap_en ? MIN(state.min_mipmap_level, state.levels - 1) : 0.0,
         .maxLod = mipmap_en ? MIN(state.max_mipmap_level, state.levels - 1) : 0.0,
-        .mipLodBias = 0.0,
+        .mipLodBias = convert_lod_bias(
+            GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MIPMAP_LOD_BIAS)),
         .pNext = sampler_next_struct,
     };
 
