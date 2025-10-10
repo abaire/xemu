@@ -127,7 +127,7 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     if (r->zeta_binding) {
         r->zeta_binding->cleared = full_clear && write_zeta;
     }
-    
+
     pg->clearing = false;
 }
 
@@ -419,6 +419,50 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
     assert(r->shader_binding);
 
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
+                     r->transform_feedback_buffers
+                         [!r->transform_feedback_read_buffer_index]);
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 0,
+        r->transform_feedback_buffers[r->transform_feedback_read_buffer_index]);
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+    GLenum feedback_primitive_mode;
+    switch (r->shader_binding->gl_primitive_mode) {
+    case GL_POINTS:
+        feedback_primitive_mode = GL_POINTS;
+        break;
+    case GL_LINES:
+    case GL_LINE_LOOP:
+    case GL_LINE_STRIP:
+    case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
+        feedback_primitive_mode = GL_LINES;
+        break;
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        feedback_primitive_mode = GL_TRIANGLES;
+        break;
+    default:
+        assert("Unsupported primitive mode");
+    }
+    glBeginTransformFeedback(feedback_primitive_mode);
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "BeginTransformFeedback failed: GL error: 0x%X %d - primitive mode %d\n", err, err, r->shader_binding->gl_primitive_mode);
+            assert(false);
+        }
+    }
+
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
         nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
@@ -518,4 +562,15 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
+
+    glEndTransformFeedback();
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+    r->transform_feedback_read_buffer_index =
+        !r->transform_feedback_read_buffer_index;
 }

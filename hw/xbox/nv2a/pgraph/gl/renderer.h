@@ -238,6 +238,10 @@ typedef struct PGRAPHGLState {
     struct supported_extensions {
         GLboolean texture_filter_anisotropic;
     } supported_extensions;
+
+    GLuint transform_feedback_read_buffer_index;
+    GLuint transform_feedback_object;
+    GLuint transform_feedback_buffers[2];
 } PGRAPHGLState;
 
 extern GloContext *g_nv2a_context_render;

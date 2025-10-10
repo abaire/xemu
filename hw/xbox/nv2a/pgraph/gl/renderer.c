@@ -62,6 +62,23 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     pgraph_gl_init_shaders(pg);
     pgraph_gl_init_display(d);
 
+    glGenTransformFeedbacks(1, &r->transform_feedback_object);
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
+                            r->transform_feedback_object);
+    glGenBuffers(2, r->transform_feedback_buffers);
+    for (int i = 0; i < 2; ++i) {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
+                     r->transform_feedback_buffers[i]);
+        // TODO: Make it clear this is reserving space for the 16 VSH registers.
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(float) * 4 * 16, NULL,
+                     GL_DYNAMIC_READ);
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+
     pgraph_gl_update_entire_memory_buffer(d);
 
     pg->uniform_attrs = 0;
@@ -74,6 +91,7 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
 static void pgraph_gl_finalize(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
 
     glo_set_current(g_nv2a_context_render);
 
@@ -83,6 +101,9 @@ static void pgraph_gl_finalize(NV2AState *d)
     pgraph_gl_finalize_reports(pg);
     pgraph_gl_finalize_buffers(pg);
     pgraph_gl_finalize_display(pg);
+
+    glDeleteTransformFeedbacks(1, &r->transform_feedback_object);
+    glDeleteBuffers(2, r->transform_feedback_buffers);
 
     glo_set_current(NULL);
 
