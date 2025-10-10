@@ -253,6 +253,8 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
         mstring_from_fmt("#version %d\n\n"
                          "%s"
                          "%s"
+                         "in vec4 v_registerState[][11];\n"
+                         "out vec4 registerState[11];\n"
                          "\n",
                          opts.vulkan ? 450 : 400, layout_in, layout_out);
     pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading, true,
@@ -274,6 +276,9 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
                        "  vtxT1 = v_vtxT1[index];\n"
                        "  vtxT2 = v_vtxT2[index];\n"
                        "  vtxT3 = v_vtxT3[index];\n"
+                       "  for (int j = 0; j < 11; j++) {\n"
+                       "    registerState[j] = v_registerState[index][j];\n"
+                       "  }\n"
                        "  EmitVertex();\n"
                        "}\n");
     } else {
@@ -290,6 +295,9 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
                        "  vtxT1 = v_vtxT1[index];\n"
                        "  vtxT2 = v_vtxT2[index];\n"
                        "  vtxT3 = v_vtxT3[index];\n"
+                       "  for (int j = 0; j < 11; j++) {\n"
+                       "    registerState[j] = v_registerState[index][j];\n"
+                       "  }\n"
                        "  EmitVertex();\n"
                        "}\n");
     }

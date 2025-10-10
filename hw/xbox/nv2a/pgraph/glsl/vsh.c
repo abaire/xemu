@@ -191,24 +191,7 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
         "\n"
         "#define FLOAT_MAX uintBitsToFloat(0x7F7FFFFFu)\n"
         "\n"
-        "struct FeedbackData {\n"
-        "  vec4 oPos;\n"
-        "  vec4 oD0;\n"
-        "  vec4 oD1;\n"
-        "  vec4 oB0;\n"
-        "  vec4 oB1;\n"
-        "  vec4 oPts;\n"
-        "  vec4 oFog;\n"
-        "  vec4 oT0;\n"
-        "  vec4 oT1;\n"
-        "  vec4 oT2;\n"
-        "  vec4 oT3;\n"
-        "};\n"
-        "\n"
-        "layout(std430, binding = 0) buffer FeedbackBuffer {\n"
-        "  FeedbackData feedback[];\n"
-        "};\n"
-        "FeedbackData registerCarryoverState = feedback[gl_VertexID];\n"
+        "uniform samplerBuffer registerCarryoverSampler;\n"
         "\n"
         "vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oD0 = vec4(0.0,0.0,0.0,1.0);\n"
@@ -216,7 +199,7 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
         "vec4 oB0 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oB1 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oPts = vec4(0.0,0.0,0.0,1.0);\n"
-        "out vec4 oFog = registerCarryoverState.oFog;\n"
+        "vec4 oFog = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oT0 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oT1 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oT2 = vec4(0.0,0.0,0.0,1.0);\n"
@@ -264,7 +247,11 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
                        "#define vtxT1 v_vtxT1\n"
                        "#define vtxT2 v_vtxT2\n"
                        "#define vtxT3 v_vtxT3\n"
+                       "out vec4 v_registerState[11];\n"
+                       "#define registerState v_registerState\n"
                        );
+    } else {
+        mstring_append(header, "out vec4 registerState[11];\n");
     }
     mstring_append(header, "\n");
 
@@ -298,7 +285,21 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
 
     mstring_append(header, "\n");
 
-    MString *body = mstring_from_str("void main() {\n");
+    MString *body = mstring_from_str(
+        "void main() {\n"
+        "  int baseIndex = gl_VertexID * 11;\n"
+        "  oPos = texelFetch(registerCarryoverSampler, baseIndex);\n"
+        "  oD0 = texelFetch(registerCarryoverSampler, baseIndex + 1);\n"
+        "  oD1 = texelFetch(registerCarryoverSampler, baseIndex + 2);\n"
+        "  oB0 = texelFetch(registerCarryoverSampler, baseIndex + 3);\n"
+        "  oB1 = texelFetch(registerCarryoverSampler, baseIndex + 4);\n"
+        "  oPts = texelFetch(registerCarryoverSampler, baseIndex + 5);\n"
+        "  oFog = texelFetch(registerCarryoverSampler, baseIndex + 6);\n"
+        "  oT0 = texelFetch(registerCarryoverSampler, baseIndex + 7);\n"
+        "  oT1 = texelFetch(registerCarryoverSampler, baseIndex + 8);\n"
+        "  oT2 = texelFetch(registerCarryoverSampler, baseIndex + 9);\n"
+        "  oT3 = texelFetch(registerCarryoverSampler, baseIndex + 10);\n"
+        );
 
     for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         if (state->compressed_attrs & (1 << i)) {
@@ -444,11 +445,24 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
         );
     }
 
-    mstring_append(body, "}\n");
+    mstring_append(body,
+                   "  registerState[0] = oPos;\n"
+                   "  registerState[1] = oD0;\n"
+                   "  registerState[2] = oD1;\n"
+                   "  registerState[3] = oB0;\n"
+                   "  registerState[4] = oB1;\n"
+                   "  registerState[5] = oPts;\n"
+                   "  registerState[6] = oFog;\n"
+                   "  registerState[7] = oT0;\n"
+                   "  registerState[8] = oT1;\n"
+                   "  registerState[9] = oT2;\n"
+                   "  registerState[10] = oT3;\n"
+                   "}\n"
+                   );
 
     /* Return combined header + source */
     MString *output =
-        mstring_from_fmt("#version %d\n\n", opts.vulkan ? 450 : 430);
+        mstring_from_fmt("#version %d\n\n", opts.vulkan ? 450 : 410);
 
     if (opts.vulkan) {
         // FIXME: Optimize uniforms

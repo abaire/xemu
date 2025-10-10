@@ -106,6 +106,13 @@ static void set_texture_sampler_uniforms(ShaderBinding *binding)
             glUniform1i(texSampLoc, i);
         }
     }
+
+    GLint registerCarryoverSamplerLoc =
+        glGetUniformLocation(binding->gl_program, "registerCarryoverSampler");
+    if (registerCarryoverSamplerLoc >= 0) {
+        // TODO: Make the 4 a preprocessor definition so it can't get out of sync.
+        glUniform1i(registerCarryoverSamplerLoc, 4);
+    }
 }
 
 static void update_shader_uniform_locs(ShaderBinding *binding)
@@ -221,7 +228,7 @@ static void generate_shaders(PGRAPHGLState *r, ShaderBinding *binding)
     key.psh.state = state->psh;
     glAttachShader(program, get_shader_module_for_key(r, &key));
 
-    const char *varyings[] = { "oFog" };
+    const char *varyings[] = { "registerState" };
     glTransformFeedbackVaryings(program, ARRAY_SIZE(varyings), varyings,
                                 GL_INTERLEAVED_ATTRIBS);
 

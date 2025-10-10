@@ -409,6 +409,114 @@ void pgraph_gl_draw_end(NV2AState *d)
     NV2A_GL_DGROUP_END();
 }
 
+static inline void setup_transform_feedback(PGRAPHGLState *r)
+{
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
+                     r->transform_feedback_buffers
+                         [!r->transform_feedback_read_buffer_index]);
+
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER,
+                  r->transform_feedback_texture_buffer_objects
+                      [r->transform_feedback_read_buffer_index]);
+
+    GLenum feedback_primitive_mode;
+    if (pgraph_glsl_need_geom(&r->shader_binding->state.geom)) {
+        switch (r->shader_binding->state.geom.primitive_mode) {
+        case PRIM_TYPE_POINTS:
+            feedback_primitive_mode = GL_POINTS;
+            break;
+        case PRIM_TYPE_LINES:
+        case PRIM_TYPE_LINE_LOOP:
+        case PRIM_TYPE_LINE_STRIP:
+            feedback_primitive_mode = GL_LINES;
+            break;
+        case PRIM_TYPE_TRIANGLES:
+        case PRIM_TYPE_TRIANGLE_STRIP:
+        case PRIM_TYPE_TRIANGLE_FAN:
+        case PRIM_TYPE_QUADS:
+        case PRIM_TYPE_QUAD_STRIP:
+        case PRIM_TYPE_POLYGON:
+            feedback_primitive_mode = GL_TRIANGLES;
+            break;
+        default:
+            assert(!"Unsupported primitive mode");
+        }
+    } else {
+        switch (r->shader_binding->gl_primitive_mode) {
+        case GL_POINTS:
+            feedback_primitive_mode = GL_POINTS;
+            break;
+        case GL_LINES:
+        case GL_LINE_LOOP:
+        case GL_LINE_STRIP:
+        case GL_LINES_ADJACENCY:
+        case GL_LINE_STRIP_ADJACENCY:
+            feedback_primitive_mode = GL_LINES;
+            break;
+        case GL_TRIANGLES:
+        case GL_TRIANGLE_STRIP:
+        case GL_TRIANGLE_FAN:
+        case GL_TRIANGLES_ADJACENCY:
+        case GL_TRIANGLE_STRIP_ADJACENCY:
+            feedback_primitive_mode = GL_TRIANGLES;
+            break;
+        default:
+            assert(!"Unsupported primitive mode");
+        }
+    }
+
+    glBeginTransformFeedback(feedback_primitive_mode);
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "BeginTransformFeedback failed: GL error: 0x%X %d - primitive mode %d\n", err, err, r->shader_binding->gl_primitive_mode);
+            assert(false);
+        }
+    }
+}
+
+static inline void teardown_transform_feedback(PGRAPHGLState *r)
+{
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+    glEndTransformFeedback();
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+
+    r->transform_feedback_read_buffer_index =
+        !r->transform_feedback_read_buffer_index;
+}
+
+static inline void carryover_registers(PGRAPHGLState *r)
+{
+    setup_transform_feedback(r);
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+
+    // TODO: Render just the last vertex
+
+
+    glDisable(GL_RASTERIZER_DISCARD);
+
+    teardown_transform_feedback(r);
+}
+
 void pgraph_gl_flush_draw(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
@@ -419,49 +527,9 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
     assert(r->shader_binding);
 
-    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
-                     r->transform_feedback_buffers
-                         [!r->transform_feedback_read_buffer_index]);
-    glBindBufferBase(
-        GL_SHADER_STORAGE_BUFFER, 0,
-        r->transform_feedback_buffers[r->transform_feedback_read_buffer_index]);
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
-    GLenum feedback_primitive_mode;
-    switch (r->shader_binding->gl_primitive_mode) {
-    case GL_POINTS:
-        feedback_primitive_mode = GL_POINTS;
-        break;
-    case GL_LINES:
-    case GL_LINE_LOOP:
-    case GL_LINE_STRIP:
-    case GL_LINES_ADJACENCY:
-    case GL_LINE_STRIP_ADJACENCY:
-        feedback_primitive_mode = GL_LINES;
-        break;
-    case GL_TRIANGLES:
-    case GL_TRIANGLE_STRIP:
-    case GL_TRIANGLE_FAN:
-    case GL_TRIANGLES_ADJACENCY:
-    case GL_TRIANGLE_STRIP_ADJACENCY:
-        feedback_primitive_mode = GL_TRIANGLES;
-        break;
-    default:
-        assert("Unsupported primitive mode");
-    }
-    glBeginTransformFeedback(feedback_primitive_mode);
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "BeginTransformFeedback failed: GL error: 0x%X %d - primitive mode %d\n", err, err, r->shader_binding->gl_primitive_mode);
-            assert(false);
-        }
-    }
+#if 1
+    setup_transform_feedback(r);
+#endif
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
@@ -563,14 +631,8 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
-    glEndTransformFeedback();
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
-    r->transform_feedback_read_buffer_index =
-        !r->transform_feedback_read_buffer_index;
+//    carryover_registers(d);
+#if 1
+    teardown_transform_feedback(r);
+#endif
 }

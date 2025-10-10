@@ -66,18 +66,28 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
                             r->transform_feedback_object);
     glGenBuffers(2, r->transform_feedback_buffers);
+    glGenTextures(2, r->transform_feedback_texture_buffer_objects);
+
     for (int i = 0; i < 2; ++i) {
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
                      r->transform_feedback_buffers[i]);
-        // TODO: Make it clear this is reserving space for the 16 VSH registers.
-        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(float) * 4 * 16, NULL,
+        // TODO: Make it clear this is reserving space for the 11 VSH output registers.
+        // TODO: Render only a single vertex into the carryover so the arbitrary (and definitely too small) 1024 can be removed
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(float) * 4 * 11 * 4096 * 100, NULL,
                      GL_DYNAMIC_READ);
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             fprintf(stderr, "GL error: 0x%X %d\n", err, err);
             assert(false);
         }
+
+        glBindTexture(GL_TEXTURE_BUFFER,
+                      r->transform_feedback_texture_buffer_objects[i]);
+        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F,
+                    r->transform_feedback_buffers[i]);
     }
+
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
 
     pgraph_gl_update_entire_memory_buffer(d);
 
