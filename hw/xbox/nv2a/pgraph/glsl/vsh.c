@@ -191,13 +191,32 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
         "\n"
         "#define FLOAT_MAX uintBitsToFloat(0x7F7FFFFFu)\n"
         "\n"
+        "struct FeedbackData {\n"
+        "  vec4 oPos;\n"
+        "  vec4 oD0;\n"
+        "  vec4 oD1;\n"
+        "  vec4 oB0;\n"
+        "  vec4 oB1;\n"
+        "  vec4 oPts;\n"
+        "  vec4 oFog;\n"
+        "  vec4 oT0;\n"
+        "  vec4 oT1;\n"
+        "  vec4 oT2;\n"
+        "  vec4 oT3;\n"
+        "};\n"
+        "\n"
+        "layout(std430, binding = 0) buffer FeedbackBuffer {\n"
+        "  FeedbackData feedback[];\n"
+        "};\n"
+        "FeedbackData registerCarryoverState = feedback[gl_VertexID];\n"
+        "\n"
         "vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oD0 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oD1 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oB0 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oB1 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oPts = vec4(0.0,0.0,0.0,1.0);\n"
-        "vec4 oFog = vec4(0.0,0.0,0.0,1.0);\n"
+        "out vec4 oFog = registerCarryoverState.oFog;\n"
         "vec4 oT0 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oT1 = vec4(0.0,0.0,0.0,1.0);\n"
         "vec4 oT2 = vec4(0.0,0.0,0.0,1.0);\n"
@@ -429,7 +448,7 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
 
     /* Return combined header + source */
     MString *output =
-        mstring_from_fmt("#version %d\n\n", opts.vulkan ? 450 : 400);
+        mstring_from_fmt("#version %d\n\n", opts.vulkan ? 450 : 430);
 
     if (opts.vulkan) {
         // FIXME: Optimize uniforms

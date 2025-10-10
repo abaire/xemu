@@ -221,6 +221,10 @@ static void generate_shaders(PGRAPHGLState *r, ShaderBinding *binding)
     key.psh.state = state->psh;
     glAttachShader(program, get_shader_module_for_key(r, &key));
 
+    const char *varyings[] = { "oFog" };
+    glTransformFeedbackVaryings(program, ARRAY_SIZE(varyings), varyings,
+                                GL_INTERLEAVED_ATTRIBS);
+
     /* link the program */
     glLinkProgram(program);
     GLint linked = 0;
