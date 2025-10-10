@@ -289,19 +289,17 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
 
     MString *body = mstring_from_str(
         "void main() {\n"
-        "  int baseIndex = gl_VertexID * 11;\n"
-        "  oPos = texelFetch(registerCarryoverSampler, baseIndex);\n"
-        "  oD0 = texelFetch(registerCarryoverSampler, baseIndex + 1);\n"
-        "  oD1 = texelFetch(registerCarryoverSampler, baseIndex + 2);\n"
-        "  oB0 = texelFetch(registerCarryoverSampler, baseIndex + 3);\n"
-        "  oB1 = texelFetch(registerCarryoverSampler, baseIndex + 4);\n"
-        "  oPts = texelFetch(registerCarryoverSampler, baseIndex + 5);\n"
-        "  oFog = texelFetch(registerCarryoverSampler, baseIndex + 6);\n"
-        "  oT0 = texelFetch(registerCarryoverSampler, baseIndex + 7);\n"
-        "  oT1 = texelFetch(registerCarryoverSampler, baseIndex + 8);\n"
-        "  oT2 = texelFetch(registerCarryoverSampler, baseIndex + 9);\n"
-        "  oT3 = texelFetch(registerCarryoverSampler, baseIndex + 10);\n"
-        );
+        "  oPos = texelFetch(registerCarryoverSampler, 0);\n"
+        "  oD0 = texelFetch(registerCarryoverSampler, 1);\n"
+        "  oD1 = texelFetch(registerCarryoverSampler, 2);\n"
+        "  oB0 = texelFetch(registerCarryoverSampler, 3);\n"
+        "  oB1 = texelFetch(registerCarryoverSampler, 4);\n"
+        "  oPts = texelFetch(registerCarryoverSampler, 5);\n"
+        "  oFog = texelFetch(registerCarryoverSampler, 6);\n"
+        "  oT0 = texelFetch(registerCarryoverSampler, 7);\n"
+        "  oT1 = texelFetch(registerCarryoverSampler, 8);\n"
+        "  oT2 = texelFetch(registerCarryoverSampler, 9);\n"
+        "  oT3 = texelFetch(registerCarryoverSampler, 10);\n");
 
     for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         if (state->compressed_attrs & (1 << i)) {
@@ -448,7 +446,7 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
     }
 
     mstring_append(body,
-                   "  registerState[0] = oPos;\n"
+                   "  registerState[0] = oPos;registerState[0].x = 0.25;registerState[0].y = 0.55;\n"
                    "  registerState[1] = oD0;\n"
                    "  registerState[2] = oD1;\n"
                    "  registerState[3] = oB0;\n"

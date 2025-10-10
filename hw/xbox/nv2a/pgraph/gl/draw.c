@@ -409,6 +409,20 @@ void pgraph_gl_draw_end(NV2AState *d)
     NV2A_GL_DGROUP_END();
 }
 
+static inline void activate_register_carryover_state(PGRAPHGLState *r)
+{
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER,
+                  r->transform_feedback_texture_buffer_objects
+                      [r->transform_feedback_read_buffer_index]);
+}
+
+static inline void deactivate_register_carryover_state(PGRAPHGLState *r)
+{
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
 static inline GLenum transform_feedback_primitive_for_gl_primitive(GLenum mode)
 {
     switch (mode) {
@@ -458,11 +472,6 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
                      r->transform_feedback_buffers
                          [!r->transform_feedback_read_buffer_index]);
 
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_BUFFER,
-                  r->transform_feedback_texture_buffer_objects
-                      [r->transform_feedback_read_buffer_index]);
-
     GLenum feedback_primitive_mode;
     if (pgraph_glsl_need_geom(&r->shader_binding->state.geom)) {
         feedback_primitive_mode =
@@ -474,6 +483,7 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
     }
 
     glBeginTransformFeedback(feedback_primitive_mode);
+    // TODO: Replace with check macro
     {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
@@ -488,25 +498,17 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
 
 static inline void teardown_transform_feedback(PGRAPHGLState *r)
 {
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
     glEndTransformFeedback();
+    // TODO: Replace with check macro
     {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
+            fprintf(stderr, "glEndTransformFeedback: GL error: 0x%X %d\n", err, err);
             assert(false);
         }
     }
 
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
 
     r->transform_feedback_read_buffer_index =
         !r->transform_feedback_read_buffer_index;
@@ -661,10 +663,17 @@ static inline void draw_last_primitive_arrays(GLenum mode, GLint first,
     glDrawArrays(new_mode, new_first, new_count);
 }
 
+// Re-renders the last primitive from the most recent flush_draw with transform
+// feedback enabled.
+//
+// NOTE: This method may only be called from pgraph_gl_flush_draw as it skips
+//   state validation and setup.
 static inline void carryover_registers(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
+
+    NV2A_GL_DGROUP_BEGIN("CARRYOVER_REGISTERS");
 
     setup_transform_feedback(r);
     glEnable(GL_RASTERIZER_DISCARD);
@@ -672,51 +681,26 @@ static inline void carryover_registers(NV2AState *d)
     GLenum mode = r->shader_binding->gl_primitive_mode;
 
     if (pg->draw_arrays_length) {
-        pgraph_gl_bind_vertex_attributes(d, pg->draw_arrays_min_start,
-                                         pg->draw_arrays_max_count - 1, false,
-                                         0, pg->draw_arrays_max_count - 1);
-
         const int last_draw_idx = pg->draw_arrays_length - 1;
         const GLint first = pg->draw_arrays_start[last_draw_idx];
         const GLsizei count = pg->draw_arrays_count[last_draw_idx];
         draw_last_primitive_arrays(mode, first, count);
     } else if (pg->inline_elements_length) {
-        uint32_t min_element = 0xFFFFFFFF;
-        uint32_t max_element = 0;
-        for (int i = 0; i < pg->inline_elements_length; ++i) {
-            max_element = MAX(pg->inline_elements[i], max_element);
-            min_element = MIN(pg->inline_elements[i], min_element);
-        }
-
-        pgraph_gl_bind_vertex_attributes(
-            d, min_element, max_element, false, 0,
-            pg->inline_elements[pg->inline_elements_length - 1]);
-
         draw_last_primitive_elements(mode, pg->inline_elements_length,
                                      pg->inline_elements);
     } else if (pg->inline_buffer_length) {
-        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; ++i) {
-            VertexAttribute *attr = &pg->vertex_attributes[i];
-            if (attr->inline_buffer_populated) {
-                glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_buffer[i]);
-                glBufferData(GL_ARRAY_BUFFER,
-                             pg->inline_buffer_length * sizeof(float) * 4,
-                             attr->inline_buffer, GL_STREAM_DRAW);
-                glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                glEnableVertexAttribArray(i);
-            } else {
-                glDisableVertexAttribArray(i);
-                glVertexAttrib4fv(i, attr->inline_value);
-            }
-        }
         draw_last_primitive_arrays(mode, 0, pg->inline_buffer_length);
     } else if (pg->inline_array_length) {
         unsigned int count = pgraph_gl_bind_inline_array(d);
         draw_last_primitive_arrays(mode, 0, count);
+    } else {
+        NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
     glDisable(GL_RASTERIZER_DISCARD);
     teardown_transform_feedback(r);
+
+    NV2A_GL_DGROUP_END();
 }
 
 void pgraph_gl_flush_draw(NV2AState *d)
@@ -728,6 +712,8 @@ void pgraph_gl_flush_draw(NV2AState *d)
         return;
     }
     assert(r->shader_binding);
+
+    activate_register_carryover_state(r);
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
@@ -830,4 +816,5 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
 
     carryover_registers(d);
+    deactivate_register_carryover_state(r);
 }

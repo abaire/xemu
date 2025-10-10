@@ -68,22 +68,29 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     glGenBuffers(2, r->transform_feedback_buffers);
     glGenTextures(2, r->transform_feedback_texture_buffer_objects);
 
+    float initial_register_state[NV2A_VSH_OUTPUT_REGISTER_COUNT][4] = {
+        { 0.f }
+    };
+    for (int i = 0; i < NV2A_VSH_OUTPUT_REGISTER_COUNT; ++i) {
+        initial_register_state[i][3] = 1.f;
+    }
+
     for (int i = 0; i < 2; ++i) {
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
                      r->transform_feedback_buffers[i]);
         glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,
-                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT, NULL,
-                     GL_DYNAMIC_READ);
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-
+                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT,
+                     initial_register_state, GL_DYNAMIC_COPY);
         glBindTexture(GL_TEXTURE_BUFFER,
                       r->transform_feedback_texture_buffer_objects[i]);
         glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F,
                     r->transform_feedback_buffers[i]);
+        // TODO: Replace with check macro.
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "XFB init: GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
     }
 
     glBindTexture(GL_TEXTURE_BUFFER, 0);
