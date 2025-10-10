@@ -321,6 +321,9 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
             state->programmable.program_length, header, body);
     }
 
+    /* Store the raw oFog value so it may be carried over to the next draw. */
+    mstring_append(body, "  vec4 vshFog = oFog;\n");
+
     if (!state->fog_enable) {
         /* FIXME: Is the fog still calculated / passed somehow?! */
         mstring_append(body, "  oFog = vec4(1.0);\n");
@@ -446,17 +449,17 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
     }
 
     mstring_append(body,
-                   "  registerState[0] = oPos;registerState[0].x = 0.25;registerState[0].y = 0.55;\n"
-                   "  registerState[1] = oD0;\n"
-                   "  registerState[2] = oD1;\n"
-                   "  registerState[3] = oB0;\n"
-                   "  registerState[4] = oB1;\n"
-                   "  registerState[5] = oPts;\n"
-                   "  registerState[6] = oFog;\n"
-                   "  registerState[7] = oT0;\n"
-                   "  registerState[8] = oT1;\n"
-                   "  registerState[9] = oT2;\n"
-                   "  registerState[10] = oT3;\n"
+                   "  registerState[0] = oPos;\n"
+                   "  registerState[1] = vtxD0;\n"
+                   "  registerState[2] = vtxD1;\n"
+                   "  registerState[3] = vtxB0;\n"
+                   "  registerState[4] = vtxB1;\n"
+                   "  registerState[5].x = gl_PointSize;\n"
+                   "  registerState[6] = vshFog;\n"
+                   "  registerState[7] = vtxT0;\n"
+                   "  registerState[8] = vtxT1;\n"
+                   "  registerState[9] = vtxT2;\n"
+                   "  registerState[10] = vtxT3;\n"
                    "}\n"
                    );
 

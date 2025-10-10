@@ -41,21 +41,24 @@ static void pgraph_gl_init_transform_feedback(PGRAPHGLState *r)
     glGenBuffers(2, r->transform_feedback_buffers);
     glGenTextures(2, r->transform_feedback_texture_buffer_objects);
 
-    float initial_register_state[NV2A_VSH_OUTPUT_REGISTER_COUNT][4] = {
-        { 0.f }
-    };
+    // The TFO must accommodate the largest number of vertices in the single
+    // primitive final draw used to capture VSH registers. This could be
+    // expanded by a geometry shader, so a reasonable upper bound is chosen.
+    const int transform_feedback_buffer_size =
+        sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT * 64;
+
+    float *initial_register_state = calloc(transform_feedback_buffer_size, 1);
+    float *register_state = initial_register_state + 3;
     for (int i = 0; i < NV2A_VSH_OUTPUT_REGISTER_COUNT; ++i) {
-        initial_register_state[i][3] = 1.f;
+        *register_state = 1.f;
+        register_state += 4;
     }
 
     for (int i = 0; i < 2; ++i) {
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
                      r->transform_feedback_buffers[i]);
-        // The TFO must accommodate the largest number of vertices in the single
-        // primitive final draw used to capture VSH registers. This could be
-        // expanded by a geometry shader, so a reasonable upper bound is chosen.
         glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,
-                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT * 64,
+                     transform_feedback_buffer_size,
                      initial_register_state, GL_DYNAMIC_COPY);
 
         glBindTexture(GL_TEXTURE_BUFFER,
@@ -70,6 +73,7 @@ static void pgraph_gl_init_transform_feedback(PGRAPHGLState *r)
             assert(false);
         }
     }
+    free(initial_register_state);
 
     glBindTexture(GL_TEXTURE_BUFFER, 0);
 }
