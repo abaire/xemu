@@ -33,6 +33,51 @@ static void early_context_init(void)
     g_nv2a_context_display = glo_context_create();
 }
 
+static void pgraph_gl_init_transform_feedback(PGRAPHGLState *r)
+{
+    glGenTransformFeedbacks(1, &r->transform_feedback_object);
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
+                            r->transform_feedback_object);
+    glGenBuffers(2, r->transform_feedback_buffers);
+    glGenTextures(2, r->transform_feedback_texture_buffer_objects);
+
+    // The TFO must accommodate the largest number of vertices in the single
+    // primitive final draw used to capture VSH registers. This could be
+    // expanded by a geometry shader, so a reasonable upper bound is chosen.
+    const int transform_feedback_buffer_size =
+        sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT * 64;
+
+    float *initial_register_state = calloc(transform_feedback_buffer_size, 1);
+    float *register_state = initial_register_state + 3;
+    for (int i = 0; i < NV2A_VSH_OUTPUT_REGISTER_COUNT; ++i) {
+        *register_state = 1.f;
+        register_state += 4;
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
+                     r->transform_feedback_buffers[i]);
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,
+                     transform_feedback_buffer_size,
+                     initial_register_state, GL_DYNAMIC_COPY);
+
+        glBindTexture(GL_TEXTURE_BUFFER,
+                      r->transform_feedback_texture_buffer_objects[i]);
+        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F,
+                    r->transform_feedback_buffers[i]);
+
+        // TODO: Replace with check macro.
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "XFB init: GL error: 0x%X %d\n", err, err);
+            assert(false);
+        }
+    }
+    free(initial_register_state);
+
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
 static void pgraph_gl_init(NV2AState *d, Error **errp)
 {
     PGRAPHState *pg = &d->pgraph;
@@ -61,23 +106,7 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     pgraph_gl_init_buffers(d);
     pgraph_gl_init_shaders(pg);
     pgraph_gl_init_display(d);
-
-    glGenTransformFeedbacks(1, &r->transform_feedback_object);
-    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
-                            r->transform_feedback_object);
-    glGenBuffers(2, r->transform_feedback_buffers);
-    for (int i = 0; i < 2; ++i) {
-        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
-                     r->transform_feedback_buffers[i]);
-        // TODO: Make it clear this is reserving space for the 16 VSH registers.
-        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(float) * 4 * 16, NULL,
-                     GL_DYNAMIC_READ);
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
+    pgraph_gl_init_transform_feedback(r);
 
     pgraph_gl_update_entire_memory_buffer(d);
 

@@ -242,6 +242,7 @@ typedef struct PGRAPHGLState {
     GLuint transform_feedback_read_buffer_index;
     GLuint transform_feedback_object;
     GLuint transform_feedback_buffers[2];
+    GLuint transform_feedback_texture_buffer_objects[2];
 } PGRAPHGLState;
 
 extern GloContext *g_nv2a_context_render;

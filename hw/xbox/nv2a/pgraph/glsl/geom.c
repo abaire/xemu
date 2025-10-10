@@ -20,6 +20,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "geom.h"
 
@@ -105,6 +106,61 @@ bool pgraph_glsl_need_geom(const GeomState *state)
     default:
         return false;
     }
+}
+
+enum ShaderPrimitiveMode
+pgraph_glsl_get_geom_output_primitive(const GeomState *state) {
+    enum ShaderPolygonMode polygon_mode = state->polygon_front_mode;
+
+    /* POINT mode shouldn't require any special work */
+    if (polygon_mode == POLY_MODE_POINT) {
+        return state->primitive_mode;
+    }
+
+    switch (state->primitive_mode) {
+    case PRIM_TYPE_POINTS:
+    case PRIM_TYPE_LINES:
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+        break;
+
+    case PRIM_TYPE_TRIANGLES:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+        if (polygon_mode == POLY_MODE_FILL) {
+            break;
+        }
+        return PRIM_TYPE_LINE_STRIP;
+
+    case PRIM_TYPE_QUADS:
+    case PRIM_TYPE_QUAD_STRIP:
+        if (polygon_mode == POLY_MODE_LINE) {
+            return PRIM_TYPE_LINE_STRIP;
+        }
+
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            break;
+        }
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    default:
+        assert(!"Unimplemented geometry shader output configuration");
+        break;
+    }
+
+    return state->primitive_mode;
 }
 
 MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
@@ -249,12 +305,15 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
     assert(layout_in);
     assert(layout_out);
     assert(body);
-    MString *output =
-        mstring_from_fmt("#version %d\n\n"
-                         "%s"
-                         "%s"
-                         "\n",
-                         opts.vulkan ? 450 : 400, layout_in, layout_out);
+    MString *output = mstring_from_fmt(
+        "#version %d\n\n"
+        "%s"
+        "%s"
+        "in vec4 v_registerState[][%d];\n"
+        "out vec4 registerState[%d];\n"
+        "\n",
+        opts.vulkan ? 450 : 400, layout_in, layout_out,
+        NV2A_VSH_OUTPUT_REGISTER_COUNT, NV2A_VSH_OUTPUT_REGISTER_COUNT);
     pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading, true,
                                true, true);
     pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading,
@@ -273,9 +332,7 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
                        "  vtxT0 = v_vtxT0[index];\n"
                        "  vtxT1 = v_vtxT1[index];\n"
                        "  vtxT2 = v_vtxT2[index];\n"
-                       "  vtxT3 = v_vtxT3[index];\n"
-                       "  EmitVertex();\n"
-                       "}\n");
+                       "  vtxT3 = v_vtxT3[index];\n");
     } else {
         mstring_append(output,
                        "void emit_vertex(int index, int provoking_index) {\n"
@@ -289,10 +346,16 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
                        "  vtxT0 = v_vtxT0[index];\n"
                        "  vtxT1 = v_vtxT1[index];\n"
                        "  vtxT2 = v_vtxT2[index];\n"
-                       "  vtxT3 = v_vtxT3[index];\n"
-                       "  EmitVertex();\n"
-                       "}\n");
+                       "  vtxT3 = v_vtxT3[index];\n");
     }
+
+    mstring_append_fmt(output,
+                       "  for (int j = 0; j < %d; ++j) {\n"
+                       "    registerState[j] = v_registerState[index][j];\n"
+                       "  }\n"
+                       "  EmitVertex();\n"
+                       "}\n",
+                       NV2A_VSH_OUTPUT_REGISTER_COUNT);
 
     mstring_append_fmt(output,
                        "\n"

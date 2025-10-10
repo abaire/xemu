@@ -422,6 +422,342 @@ void pgraph_gl_draw_end(NV2AState *d)
     NV2A_GL_DGROUP_END();
 }
 
+static inline void activate_register_carryover_state(PGRAPHGLState *r)
+{
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER,
+                  r->transform_feedback_texture_buffer_objects
+                      [r->transform_feedback_read_buffer_index]);
+}
+
+static inline void deactivate_register_carryover_state(PGRAPHGLState *r)
+{
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
+static inline GLenum transform_feedback_primitive_for_gl_primitive(GLenum mode)
+{
+    switch (mode) {
+    case GL_POINTS:
+        return GL_POINTS;
+    case GL_LINES:
+    case GL_LINE_LOOP:
+    case GL_LINE_STRIP:
+    case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
+        return GL_LINES;
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        return GL_TRIANGLES;
+    default:
+        assert(!"Unsupported primitive mode for transform feedback");
+    }
+}
+
+static inline GLenum transform_feedback_primitive_for_shader_primitive(enum ShaderPrimitiveMode mode)
+{
+    switch (mode) {
+    case PRIM_TYPE_POINTS:
+        return GL_POINTS;
+    case PRIM_TYPE_LINES:
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+        return GL_LINES;
+    case PRIM_TYPE_TRIANGLES:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+    case PRIM_TYPE_QUADS:
+    case PRIM_TYPE_QUAD_STRIP:
+    case PRIM_TYPE_POLYGON:
+        return GL_TRIANGLES;
+    default:
+        assert(!"Unsupported primitive mode");
+    }
+}
+
+static inline void setup_transform_feedback(PGRAPHGLState *r)
+{
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
+                            r->transform_feedback_object);
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
+                     r->transform_feedback_buffers
+                         [!r->transform_feedback_read_buffer_index]);
+
+    GLenum feedback_primitive_mode;
+    if (pgraph_glsl_need_geom(&r->shader_binding->state.geom)) {
+        feedback_primitive_mode =
+            transform_feedback_primitive_for_shader_primitive(
+                pgraph_glsl_get_geom_output_primitive(
+                    &r->shader_binding->state.geom));
+    } else {
+        feedback_primitive_mode = transform_feedback_primitive_for_gl_primitive(
+            r->shader_binding->gl_primitive_mode);
+    }
+
+    glBeginTransformFeedback(feedback_primitive_mode);
+    // TODO: Replace with check macro
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr,
+                    "BeginTransformFeedback failed: GL error: 0x%X %d - "
+                    "primitive mode %d\n",
+                    err, err, r->shader_binding->gl_primitive_mode);
+            assert(!"glBeginTransformFeedback failed");
+        }
+    }
+}
+
+static inline void teardown_transform_feedback(PGRAPHGLState *r)
+{
+    glEndTransformFeedback();
+    // TODO: Replace with check macro
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "glEndTransformFeedback: GL error: 0x%X %d\n", err,
+                    err);
+            assert(!"glEndTransformFeedback failed");
+        }
+    }
+
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
+
+    r->transform_feedback_read_buffer_index =
+        !r->transform_feedback_read_buffer_index;
+}
+
+static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
+                                                const GLvoid *indices)
+{
+    GLenum new_mode = mode;
+    GLsizei new_count = 0;
+    const GLuint *u32_indices = (const GLuint *)indices;
+    GLuint new_indices[6];
+
+    switch (mode) {
+    case GL_POINTS:
+        assert(count >= 1 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_count = 1;
+        new_indices[0] = u32_indices[count - 1];
+        break;
+
+    case GL_LINES:
+        assert(count >= 2 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_count = 2;
+        new_indices[0] = u32_indices[count - 2];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_LINE_STRIP:
+        assert(count >= 2 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_mode = GL_LINES;
+        new_count = 2;
+        new_indices[0] = u32_indices[count - 2];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_LINE_LOOP:
+        assert(count >= 2 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_mode = GL_LINES;
+        new_count = 2;
+        new_indices[0] = u32_indices[0];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLES:
+        assert(count >= 3 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_count = 3;
+        new_indices[0] = u32_indices[count - 3];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLE_STRIP:
+        assert(count >= 3 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_mode = GL_TRIANGLES;
+        new_count = 3;
+        new_indices[0] = u32_indices[count - 3];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLE_FAN:
+        assert(count >= 3 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_mode = GL_TRIANGLES;
+        new_count = 3;
+        new_indices[0] = u32_indices[0];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
+    case GL_QUADS:
+    case GL_QUAD_STRIP:
+        assert(count >= 4 && "draw_last_primitive_elements: not enough vertices for primitive");
+        new_count = 4;
+        new_indices[0] = u32_indices[count - 4];
+        new_indices[1] = u32_indices[count - 3];
+        new_indices[2] = u32_indices[count - 2];
+        new_indices[3] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        assert(count >= 6 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_count = 6;
+        new_indices[0] = u32_indices[count - 6];
+        new_indices[1] = u32_indices[count - 5];
+        new_indices[2] = u32_indices[count - 4];
+        new_indices[3] = u32_indices[count - 3];
+        new_indices[4] = u32_indices[count - 2];
+        new_indices[5] = u32_indices[count - 1];
+        break;
+
+    case GL_POLYGON:
+        break;
+
+    default:
+        assert(!"draw_last_primitive_elements: Unsupported primitive mode");
+    }
+
+    glDrawElements(new_mode, new_count, GL_UNSIGNED_INT, new_indices);
+}
+
+static inline void draw_last_primitive_arrays(GLenum mode, GLint first,
+                                              GLsizei count)
+{
+    GLenum new_mode = mode;
+    GLint new_first = 0;
+    GLsizei new_count = 0;
+
+    switch (mode) {
+    case GL_POINTS:
+        assert(count >= 1 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 1;
+        new_count = 1;
+        break;
+
+    case GL_LINES:
+        assert(count >= 2 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 2;
+        new_count = 2;
+        break;
+
+    case GL_LINE_STRIP:
+        assert(count >= 2 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_mode = GL_LINES;
+        new_first = first + count - 2;
+        new_count = 2;
+        break;
+
+    case GL_LINE_LOOP:
+        assert(count >= 2 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        {
+            GLuint new_indices[2] = { first, first + count - 1 };
+            glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, new_indices);
+        }
+        return;
+
+    case GL_TRIANGLES:
+        assert(count >= 3 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 3;
+        new_count = 3;
+        break;
+
+    case GL_TRIANGLE_STRIP:
+        assert(count >= 3 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_mode = GL_TRIANGLES;
+        new_first = first + count - 3;
+        new_count = 3;
+        break;
+
+    case GL_TRIANGLE_FAN:
+        assert(count >= 3 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        {
+            GLuint new_indices[3] = { first, first + count - 2,
+                                      first + count - 1 };
+            glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, new_indices);
+        }
+        return;
+
+    case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
+    case GL_QUADS:
+    case GL_QUAD_STRIP:
+        assert(count >= 4 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 4;
+        new_count = 4;
+        break;
+
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        assert(count >= 6 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 6;
+        new_count = 6;
+        break;
+
+    case GL_POLYGON:
+        break;
+
+    default:
+        assert(!"draw_last_primitive_arrays: Unsupported primitive mode");
+    }
+
+    glDrawArrays(new_mode, new_first, new_count);
+}
+
+// Re-renders the last primitive from the most recent flush_draw with transform
+// feedback enabled.
+//
+// NOTE: This method may only be called from pgraph_gl_flush_draw as it skips
+//   state validation and setup.
+static inline void carryover_registers(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    NV2A_GL_DGROUP_BEGIN("CARRYOVER_REGISTERS");
+    glResumeTransformFeedback();
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    GLenum mode = r->shader_binding->gl_primitive_mode;
+
+    // TODO: If a geometry shader is enabled, it is important to set the
+    //  transform buffer primitive mode to match the geometry shader, otherwise
+    //  a GL error will be emitted when attempting the last-primitive draw.
+    //
+    // This is most easily reproduced by rendering with polygon fill mode
+    // disabled. E.g., the Line width tests:
+    // https://abaire.github.io/nxdk_pgraph_tests_golden_results/results/Line_width/index.html
+
+    if (pg->draw_arrays_length) {
+        const int last_draw_idx = pg->draw_arrays_length - 1;
+        const GLint first = pg->draw_arrays_start[last_draw_idx];
+        const GLsizei count = pg->draw_arrays_count[last_draw_idx];
+        draw_last_primitive_arrays(mode, first, count);
+    } else if (pg->inline_elements_length) {
+        draw_last_primitive_elements(mode, pg->inline_elements_length,
+                                     pg->inline_elements);
+    } else if (pg->inline_buffer_length) {
+        draw_last_primitive_arrays(mode, 0, pg->inline_buffer_length);
+    } else if (pg->inline_array_length) {
+        unsigned int count = pgraph_gl_bind_inline_array(d);
+        draw_last_primitive_arrays(mode, 0, count);
+    }
+
+    glDisable(GL_RASTERIZER_DISCARD);
+
+    NV2A_GL_DGROUP_END();
+}
+
 void pgraph_gl_flush_draw(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
@@ -432,49 +768,15 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
     assert(r->shader_binding);
 
-    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
-                     r->transform_feedback_buffers
-                         [!r->transform_feedback_read_buffer_index]);
-    glBindBufferBase(
-        GL_SHADER_STORAGE_BUFFER, 0,
-        r->transform_feedback_buffers[r->transform_feedback_read_buffer_index]);
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
-    GLenum feedback_primitive_mode;
-    switch (r->shader_binding->gl_primitive_mode) {
-    case GL_POINTS:
-        feedback_primitive_mode = GL_POINTS;
-        break;
-    case GL_LINES:
-    case GL_LINE_LOOP:
-    case GL_LINE_STRIP:
-    case GL_LINES_ADJACENCY:
-    case GL_LINE_STRIP_ADJACENCY:
-        feedback_primitive_mode = GL_LINES;
-        break;
-    case GL_TRIANGLES:
-    case GL_TRIANGLE_STRIP:
-    case GL_TRIANGLE_FAN:
-    case GL_TRIANGLES_ADJACENCY:
-    case GL_TRIANGLE_STRIP_ADJACENCY:
-        feedback_primitive_mode = GL_TRIANGLES;
-        break;
-    default:
-        assert("Unsupported primitive mode");
-    }
-    glBeginTransformFeedback(feedback_primitive_mode);
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "BeginTransformFeedback failed: GL error: 0x%X %d - primitive mode %d\n", err, err, r->shader_binding->gl_primitive_mode);
-            assert(false);
-        }
-    }
+    activate_register_carryover_state(r);
+
+    // macOS 15.7.1 has a GL bug that causes a segfault if a
+    // glBeginTransformFeedback/glEndTransformFeedback block is executed
+    // immediately after the primary rendering.
+    // Because only the last vertex is of interest, feedback is immediately
+    // paused and only re-enabled for a redraw of the last primitive.
+    setup_transform_feedback(r);
+    glPauseTransformFeedback();
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
@@ -576,14 +878,7 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
-    glEndTransformFeedback();
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            fprintf(stderr, "GL error: 0x%X %d\n", err, err);
-            assert(false);
-        }
-    }
-    r->transform_feedback_read_buffer_index =
-        !r->transform_feedback_read_buffer_index;
+    carryover_registers(d);
+    teardown_transform_feedback(r);
+    deactivate_register_carryover_state(r);
 }
