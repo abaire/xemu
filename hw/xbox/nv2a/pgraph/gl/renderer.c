@@ -51,13 +51,18 @@ static void pgraph_gl_init_transform_feedback(PGRAPHGLState *r)
     for (int i = 0; i < 2; ++i) {
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
                      r->transform_feedback_buffers[i]);
+        // The TFO must accommodate the largest number of vertices in the single
+        // primitive final draw used to capture VSH registers. This could be
+        // expanded by a geometry shader, so a reasonable upper bound is chosen.
         glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,
-                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT,
+                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT * 64,
                      initial_register_state, GL_DYNAMIC_COPY);
+
         glBindTexture(GL_TEXTURE_BUFFER,
                       r->transform_feedback_texture_buffer_objects[i]);
         glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F,
                     r->transform_feedback_buffers[i]);
+
         // TODO: Replace with check macro.
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {

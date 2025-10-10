@@ -468,6 +468,8 @@ static inline GLenum transform_feedback_primitive_for_shader_primitive(enum Shad
 
 static inline void setup_transform_feedback(PGRAPHGLState *r)
 {
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
+                            r->transform_feedback_object);
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
                      r->transform_feedback_buffers
                          [!r->transform_feedback_read_buffer_index]);
@@ -503,12 +505,14 @@ static inline void teardown_transform_feedback(PGRAPHGLState *r)
     {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            fprintf(stderr, "glEndTransformFeedback: GL error: 0x%X %d\n", err, err);
+            fprintf(stderr, "glEndTransformFeedback: GL error: 0x%X %d\n", err,
+                    err);
             assert(!"glEndTransformFeedback failed");
         }
     }
 
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
+    glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
 
     r->transform_feedback_read_buffer_index =
         !r->transform_feedback_read_buffer_index;
@@ -675,8 +679,8 @@ static inline void carryover_registers(NV2AState *d)
 
     NV2A_GL_DGROUP_BEGIN("CARRYOVER_REGISTERS");
 
-    setup_transform_feedback(r);
     glEnable(GL_RASTERIZER_DISCARD);
+    setup_transform_feedback(r);
 
     GLenum mode = r->shader_binding->gl_primitive_mode;
 
@@ -697,8 +701,8 @@ static inline void carryover_registers(NV2AState *d)
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
-    glDisable(GL_RASTERIZER_DISCARD);
     teardown_transform_feedback(r);
+    glDisable(GL_RASTERIZER_DISCARD);
 
     NV2A_GL_DGROUP_END();
 }
