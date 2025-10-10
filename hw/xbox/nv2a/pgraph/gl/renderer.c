@@ -33,35 +33,8 @@ static void early_context_init(void)
     g_nv2a_context_display = glo_context_create();
 }
 
-static void pgraph_gl_init(NV2AState *d, Error **errp)
+static void pgraph_gl_init_transform_feedback(PGRAPHGLState *r)
 {
-    PGRAPHState *pg = &d->pgraph;
-
-    pg->gl_renderer_state = g_malloc0(sizeof(*pg->gl_renderer_state));
-    PGRAPHGLState *r = pg->gl_renderer_state;
-
-    /* fire up opengl */
-    glo_set_current(g_nv2a_context_render);
-
-#if DEBUG_NV2A_GL
-    gl_debug_initialize();
-#endif
-
-    /* DXT textures */
-    assert(glo_check_extension("GL_EXT_texture_compression_s3tc"));
-    /*  Internal RGB565 texture format */
-    assert(glo_check_extension("GL_ARB_ES2_compatibility"));
-
-    glGetFloatv(GL_SMOOTH_LINE_WIDTH_RANGE, r->supported_smooth_line_width_range);
-    glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, r->supported_aliased_line_width_range);
-
-    pgraph_gl_init_surfaces(pg);
-    pgraph_gl_init_reports(d);
-    pgraph_gl_init_textures(d);
-    pgraph_gl_init_buffers(d);
-    pgraph_gl_init_shaders(pg);
-    pgraph_gl_init_display(d);
-
     glGenTransformFeedbacks(1, &r->transform_feedback_object);
     glBindTransformFeedback(GL_TRANSFORM_FEEDBACK,
                             r->transform_feedback_object);
@@ -94,6 +67,37 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     }
 
     glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
+static void pgraph_gl_init(NV2AState *d, Error **errp)
+{
+    PGRAPHState *pg = &d->pgraph;
+
+    pg->gl_renderer_state = g_malloc0(sizeof(*pg->gl_renderer_state));
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    /* fire up opengl */
+    glo_set_current(g_nv2a_context_render);
+
+#if DEBUG_NV2A_GL
+    gl_debug_initialize();
+#endif
+
+    /* DXT textures */
+    assert(glo_check_extension("GL_EXT_texture_compression_s3tc"));
+    /*  Internal RGB565 texture format */
+    assert(glo_check_extension("GL_ARB_ES2_compatibility"));
+
+    glGetFloatv(GL_SMOOTH_LINE_WIDTH_RANGE, r->supported_smooth_line_width_range);
+    glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, r->supported_aliased_line_width_range);
+
+    pgraph_gl_init_surfaces(pg);
+    pgraph_gl_init_reports(d);
+    pgraph_gl_init_textures(d);
+    pgraph_gl_init_buffers(d);
+    pgraph_gl_init_shaders(pg);
+    pgraph_gl_init_display(d);
+    pgraph_gl_init_transform_feedback(r);
 
     pgraph_gl_update_entire_memory_buffer(d);
 

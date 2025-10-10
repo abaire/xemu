@@ -491,7 +491,7 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
                     "BeginTransformFeedback failed: GL error: 0x%X %d - "
                     "primitive mode %d\n",
                     err, err, r->shader_binding->gl_primitive_mode);
-            assert(false);
+            assert(!"glBeginTransformFeedback failed");
         }
     }
 }
@@ -504,7 +504,7 @@ static inline void teardown_transform_feedback(PGRAPHGLState *r)
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             fprintf(stderr, "glEndTransformFeedback: GL error: 0x%X %d\n", err, err);
-            assert(false);
+            assert(!"glEndTransformFeedback failed");
         }
     }
 
