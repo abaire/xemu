@@ -20,6 +20,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "vsh.h"
 #include "vsh-ff.h"
@@ -237,21 +238,22 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
                                false, opts.prefix_outputs, false);
 
     if (opts.prefix_outputs) {
-        mstring_append(header,
-                       "#define vtxD0 v_vtxD0\n"
-                       "#define vtxD1 v_vtxD1\n"
-                       "#define vtxB0 v_vtxB0\n"
-                       "#define vtxB1 v_vtxB1\n"
-                       "#define vtxFog v_vtxFog\n"
-                       "#define vtxT0 v_vtxT0\n"
-                       "#define vtxT1 v_vtxT1\n"
-                       "#define vtxT2 v_vtxT2\n"
-                       "#define vtxT3 v_vtxT3\n"
-                       "out vec4 v_registerState[11];\n"
-                       "#define registerState v_registerState\n"
-                       );
+        mstring_append_fmt(header,
+                           "#define vtxD0 v_vtxD0\n"
+                           "#define vtxD1 v_vtxD1\n"
+                           "#define vtxB0 v_vtxB0\n"
+                           "#define vtxB1 v_vtxB1\n"
+                           "#define vtxFog v_vtxFog\n"
+                           "#define vtxT0 v_vtxT0\n"
+                           "#define vtxT1 v_vtxT1\n"
+                           "#define vtxT2 v_vtxT2\n"
+                           "#define vtxT3 v_vtxT3\n"
+                           "out vec4 v_registerState[%d];\n"
+                           "#define registerState v_registerState\n",
+                           NV2A_VSH_OUTPUT_REGISTER_COUNT);
     } else {
-        mstring_append(header, "out vec4 registerState[11];\n");
+        mstring_append_fmt(header, "out vec4 registerState[%d];\n",
+                           NV2A_VSH_OUTPUT_REGISTER_COUNT);
     }
     mstring_append(header, "\n");
 

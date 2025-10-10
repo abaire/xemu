@@ -71,9 +71,8 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     for (int i = 0; i < 2; ++i) {
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,
                      r->transform_feedback_buffers[i]);
-        // TODO: Make it clear this is reserving space for the 11 VSH output registers.
-        // TODO: Render only a single vertex into the carryover so the arbitrary (and definitely too small) 1024 can be removed
-        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, sizeof(float) * 4 * 11 * 4096 * 100, NULL,
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,
+                     sizeof(float) * 4 * NV2A_VSH_OUTPUT_REGISTER_COUNT, NULL,
                      GL_DYNAMIC_READ);
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {

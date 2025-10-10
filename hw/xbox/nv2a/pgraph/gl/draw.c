@@ -409,6 +409,49 @@ void pgraph_gl_draw_end(NV2AState *d)
     NV2A_GL_DGROUP_END();
 }
 
+static inline GLenum transform_feedback_primitive_for_gl_primitive(GLenum mode)
+{
+    switch (mode) {
+    case GL_POINTS:
+        return GL_POINTS;
+    case GL_LINES:
+    case GL_LINE_LOOP:
+    case GL_LINE_STRIP:
+    case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
+        return GL_LINES;
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        return GL_TRIANGLES;
+    default:
+        assert(!"Unsupported primitive mode for transform feedback");
+    }
+}
+
+static inline GLenum transform_feedback_primitive_for_shader_primitive(enum ShaderPrimitiveMode mode)
+{
+    switch (mode) {
+    case PRIM_TYPE_POINTS:
+        return GL_POINTS;
+    case PRIM_TYPE_LINES:
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+        return GL_LINES;
+    case PRIM_TYPE_TRIANGLES:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+    case PRIM_TYPE_QUADS:
+    case PRIM_TYPE_QUAD_STRIP:
+    case PRIM_TYPE_POLYGON:
+        return GL_TRIANGLES;
+    default:
+        assert(!"Unsupported primitive mode");
+    }
+}
+
 static inline void setup_transform_feedback(PGRAPHGLState *r)
 {
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
@@ -422,55 +465,22 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
 
     GLenum feedback_primitive_mode;
     if (pgraph_glsl_need_geom(&r->shader_binding->state.geom)) {
-        switch (r->shader_binding->state.geom.primitive_mode) {
-        case PRIM_TYPE_POINTS:
-            feedback_primitive_mode = GL_POINTS;
-            break;
-        case PRIM_TYPE_LINES:
-        case PRIM_TYPE_LINE_LOOP:
-        case PRIM_TYPE_LINE_STRIP:
-            feedback_primitive_mode = GL_LINES;
-            break;
-        case PRIM_TYPE_TRIANGLES:
-        case PRIM_TYPE_TRIANGLE_STRIP:
-        case PRIM_TYPE_TRIANGLE_FAN:
-        case PRIM_TYPE_QUADS:
-        case PRIM_TYPE_QUAD_STRIP:
-        case PRIM_TYPE_POLYGON:
-            feedback_primitive_mode = GL_TRIANGLES;
-            break;
-        default:
-            assert(!"Unsupported primitive mode");
-        }
+        feedback_primitive_mode =
+            transform_feedback_primitive_for_shader_primitive(
+                r->shader_binding->state.geom.primitive_mode);
     } else {
-        switch (r->shader_binding->gl_primitive_mode) {
-        case GL_POINTS:
-            feedback_primitive_mode = GL_POINTS;
-            break;
-        case GL_LINES:
-        case GL_LINE_LOOP:
-        case GL_LINE_STRIP:
-        case GL_LINES_ADJACENCY:
-        case GL_LINE_STRIP_ADJACENCY:
-            feedback_primitive_mode = GL_LINES;
-            break;
-        case GL_TRIANGLES:
-        case GL_TRIANGLE_STRIP:
-        case GL_TRIANGLE_FAN:
-        case GL_TRIANGLES_ADJACENCY:
-        case GL_TRIANGLE_STRIP_ADJACENCY:
-            feedback_primitive_mode = GL_TRIANGLES;
-            break;
-        default:
-            assert(!"Unsupported primitive mode");
-        }
+        feedback_primitive_mode = transform_feedback_primitive_for_gl_primitive(
+            r->shader_binding->gl_primitive_mode);
     }
 
     glBeginTransformFeedback(feedback_primitive_mode);
     {
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
-            fprintf(stderr, "BeginTransformFeedback failed: GL error: 0x%X %d - primitive mode %d\n", err, err, r->shader_binding->gl_primitive_mode);
+            fprintf(stderr,
+                    "BeginTransformFeedback failed: GL error: 0x%X %d - "
+                    "primitive mode %d\n",
+                    err, err, r->shader_binding->gl_primitive_mode);
             assert(false);
         }
     }
@@ -502,18 +512,210 @@ static inline void teardown_transform_feedback(PGRAPHGLState *r)
         !r->transform_feedback_read_buffer_index;
 }
 
-static inline void carryover_registers(PGRAPHGLState *r)
+static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
+                                                const GLvoid *indices)
 {
-    setup_transform_feedback(r);
+    GLenum new_mode = mode;
+    GLsizei new_count = 0;
+    const GLuint *u32_indices = (const GLuint *)indices;
+    GLuint new_indices[4];
 
+    switch (mode) {
+    case GL_POINTS:
+        if (count < 1)
+            return;
+        new_count = 1;
+        new_indices[0] = u32_indices[count - 1];
+        break;
+
+    case GL_LINES:
+        if (count < 2)
+            return;
+        new_count = 2;
+        new_indices[0] = u32_indices[count - 2];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_LINE_STRIP:
+        if (count < 2)
+            return;
+        new_mode = GL_LINES;
+        new_count = 2;
+        new_indices[0] = u32_indices[count - 2];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_LINE_LOOP:
+        if (count < 2)
+            return;
+        new_mode = GL_LINES;
+        new_count = 2;
+        new_indices[0] = u32_indices[0];
+        new_indices[1] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLES:
+        if (count < 3)
+            return;
+        new_count = 3;
+        new_indices[0] = u32_indices[count - 3];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLE_STRIP:
+        if (count < 3)
+            return;
+        new_mode = GL_TRIANGLES;
+        new_count = 3;
+        new_indices[0] = u32_indices[count - 3];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLE_FAN:
+        if (count < 3)
+            return;
+        new_mode = GL_TRIANGLES;
+        new_count = 3;
+        new_indices[0] = u32_indices[0];
+        new_indices[1] = u32_indices[count - 2];
+        new_indices[2] = u32_indices[count - 1];
+        break;
+
+    default:
+        return;
+    }
+
+    glDrawElements(new_mode, new_count, GL_UNSIGNED_INT, new_indices);
+}
+
+static inline void draw_last_primitive_arrays(GLenum mode, GLint first,
+                                              GLsizei count)
+{
+    GLenum new_mode = mode;
+    GLint new_first = 0;
+    GLsizei new_count = 0;
+
+    switch (mode) {
+    case GL_POINTS:
+        if (count < 1)
+            return;
+        new_first = first + count - 1;
+        new_count = 1;
+        break;
+
+    case GL_LINES:
+        if (count < 2)
+            return;
+        new_first = first + count - 2;
+        new_count = 2;
+        break;
+
+    case GL_LINE_STRIP:
+        if (count < 2)
+            return;
+        new_mode = GL_LINES;
+        new_first = first + count - 2;
+        new_count = 2;
+        break;
+
+    case GL_TRIANGLES:
+        if (count < 3)
+            return;
+        new_first = first + count - 3;
+        new_count = 3;
+        break;
+
+    case GL_TRIANGLE_STRIP:
+        if (count < 3)
+            return;
+        new_mode = GL_TRIANGLES;
+        new_first = first + count - 3;
+        new_count = 3;
+        break;
+
+    case GL_LINE_LOOP:
+        if (count < 2)
+            return;
+        {
+            GLuint new_indices[2] = { first, first + count - 1 };
+            glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, new_indices);
+        }
+        return;
+
+    case GL_TRIANGLE_FAN:
+        if (count < 3)
+            return;
+        {
+            GLuint new_indices[3] = { first, first + count - 2,
+                                      first + count - 1 };
+            glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, new_indices);
+        }
+        return;
+
+    default:
+        return;
+    }
+
+    glDrawArrays(new_mode, new_first, new_count);
+}
+
+static inline void carryover_registers(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    setup_transform_feedback(r);
     glEnable(GL_RASTERIZER_DISCARD);
 
+    GLenum mode = r->shader_binding->gl_primitive_mode;
 
-    // TODO: Render just the last vertex
+    if (pg->draw_arrays_length) {
+        pgraph_gl_bind_vertex_attributes(d, pg->draw_arrays_min_start,
+                                         pg->draw_arrays_max_count - 1, false,
+                                         0, pg->draw_arrays_max_count - 1);
 
+        const int last_draw_idx = pg->draw_arrays_length - 1;
+        const GLint first = pg->draw_arrays_start[last_draw_idx];
+        const GLsizei count = pg->draw_arrays_count[last_draw_idx];
+        draw_last_primitive_arrays(mode, first, count);
+    } else if (pg->inline_elements_length) {
+        uint32_t min_element = 0xFFFFFFFF;
+        uint32_t max_element = 0;
+        for (int i = 0; i < pg->inline_elements_length; ++i) {
+            max_element = MAX(pg->inline_elements[i], max_element);
+            min_element = MIN(pg->inline_elements[i], min_element);
+        }
+
+        pgraph_gl_bind_vertex_attributes(
+            d, min_element, max_element, false, 0,
+            pg->inline_elements[pg->inline_elements_length - 1]);
+
+        draw_last_primitive_elements(mode, pg->inline_elements_length,
+                                     pg->inline_elements);
+    } else if (pg->inline_buffer_length) {
+        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; ++i) {
+            VertexAttribute *attr = &pg->vertex_attributes[i];
+            if (attr->inline_buffer_populated) {
+                glBindBuffer(GL_ARRAY_BUFFER, r->gl_inline_buffer[i]);
+                glBufferData(GL_ARRAY_BUFFER,
+                             pg->inline_buffer_length * sizeof(float) * 4,
+                             attr->inline_buffer, GL_STREAM_DRAW);
+                glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glEnableVertexAttribArray(i);
+            } else {
+                glDisableVertexAttribArray(i);
+                glVertexAttrib4fv(i, attr->inline_value);
+            }
+        }
+        draw_last_primitive_arrays(mode, 0, pg->inline_buffer_length);
+    } else if (pg->inline_array_length) {
+        unsigned int count = pgraph_gl_bind_inline_array(d);
+        draw_last_primitive_arrays(mode, 0, count);
+    }
 
     glDisable(GL_RASTERIZER_DISCARD);
-
     teardown_transform_feedback(r);
 }
 
@@ -526,10 +728,6 @@ void pgraph_gl_flush_draw(NV2AState *d)
         return;
     }
     assert(r->shader_binding);
-
-#if 1
-    setup_transform_feedback(r);
-#endif
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
@@ -631,8 +829,5 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
-//    carryover_registers(d);
-#if 1
-    teardown_transform_feedback(r);
-#endif
+    carryover_registers(d);
 }
