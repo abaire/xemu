@@ -108,6 +108,61 @@ bool pgraph_glsl_need_geom(const GeomState *state)
     }
 }
 
+enum ShaderPrimitiveMode
+pgraph_glsl_get_geom_output_primitive(const GeomState *state) {
+    enum ShaderPolygonMode polygon_mode = state->polygon_front_mode;
+
+    /* POINT mode shouldn't require any special work */
+    if (polygon_mode == POLY_MODE_POINT) {
+        return state->primitive_mode;
+    }
+
+    switch (state->primitive_mode) {
+    case PRIM_TYPE_POINTS:
+    case PRIM_TYPE_LINES:
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+        break;
+
+    case PRIM_TYPE_TRIANGLES:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+        if (polygon_mode == POLY_MODE_FILL) {
+            break;
+        }
+        return PRIM_TYPE_LINE_STRIP;
+
+    case PRIM_TYPE_QUADS:
+    case PRIM_TYPE_QUAD_STRIP:
+        if (polygon_mode == POLY_MODE_LINE) {
+            return PRIM_TYPE_LINE_STRIP;
+        }
+
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            break;
+        }
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    default:
+        assert(!"Unimplemented geometry shader output configuration");
+        break;
+    }
+
+    return state->primitive_mode;
+}
+
 MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
 {
     /* FIXME: Missing support for 2-sided-poly mode */

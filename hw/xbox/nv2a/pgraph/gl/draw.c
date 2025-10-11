@@ -478,7 +478,8 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
     if (pgraph_glsl_need_geom(&r->shader_binding->state.geom)) {
         feedback_primitive_mode =
             transform_feedback_primitive_for_shader_primitive(
-                r->shader_binding->state.geom.primitive_mode);
+                pgraph_glsl_get_geom_output_primitive(
+                    &r->shader_binding->state.geom));
     } else {
         feedback_primitive_mode = transform_feedback_primitive_for_gl_primitive(
             r->shader_binding->gl_primitive_mode);
