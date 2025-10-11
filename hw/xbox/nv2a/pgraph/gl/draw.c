@@ -716,6 +716,14 @@ static inline void carryover_registers(NV2AState *d)
 
     GLenum mode = r->shader_binding->gl_primitive_mode;
 
+    // TODO: If a geometry shader is enabled, it is important to set the
+    //  transform buffer primitive mode to match the geometry shader, otherwise
+    //  a GL error will be emitted when attempting the last-primitive draw.
+    //
+    // This is most easily reproduced by rendering with polygon fill mode
+    // disabled. E.g., the Line width tests:
+    // https://abaire.github.io/nxdk_pgraph_tests_golden_results/results/Line_width/index.html
+
     if (pg->draw_arrays_length) {
         const int last_draw_idx = pg->draw_arrays_length - 1;
         const GLint first = pg->draw_arrays_start[last_draw_idx];
