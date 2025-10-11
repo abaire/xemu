@@ -582,6 +582,7 @@ static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
         new_indices[2] = u32_indices[count - 1];
         break;
 
+    case GL_LINES_ADJACENCY:
     case GL_QUADS:
         assert(count >= 4 && "draw_last_primitive_elements: not enough vertices for primitive");
         new_count = 3;
@@ -658,6 +659,7 @@ static inline void draw_last_primitive_arrays(GLenum mode, GLint first,
         }
         return;
 
+    case GL_LINES_ADJACENCY:
     case GL_QUADS:
         assert(count >= 4 && "draw_last_primitive_arrays: not enough vertices for primitive");
         new_first = first + count - 4;
@@ -685,9 +687,9 @@ static inline void carryover_registers(NV2AState *d)
     PGRAPHGLState *r = pg->gl_renderer_state;
 
     NV2A_GL_DGROUP_BEGIN("CARRYOVER_REGISTERS");
+    glResumeTransformFeedback();
 
     glEnable(GL_RASTERIZER_DISCARD);
-    setup_transform_feedback(r);
 
     GLenum mode = r->shader_binding->gl_primitive_mode;
 
@@ -704,13 +706,8 @@ static inline void carryover_registers(NV2AState *d)
     } else if (pg->inline_array_length) {
         unsigned int count = pgraph_gl_bind_inline_array(d);
         draw_last_primitive_arrays(mode, 0, count);
-    } else {
-        // TODO: This will crash on macOS.
-        assert(!"Transform feedback capture must render at least one point");
-        NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
 
-    teardown_transform_feedback(r);
     glDisable(GL_RASTERIZER_DISCARD);
 
     NV2A_GL_DGROUP_END();
@@ -727,6 +724,14 @@ void pgraph_gl_flush_draw(NV2AState *d)
     assert(r->shader_binding);
 
     activate_register_carryover_state(r);
+
+    // macOS 15.7.1 has a GL bug that causes a segfault if a
+    // glBeginTransformFeedback/glEndTransformFeedback block is executed
+    // immediately after the primary rendering.
+    // Because only the last vertex is of interest, feedback is immediately
+    // paused and only re-enabled for a redraw of the last primitive.
+    setup_transform_feedback(r);
+    glPauseTransformFeedback();
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");
@@ -829,5 +834,6 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
 
     carryover_registers(d);
+    teardown_transform_feedback(r);
     deactivate_register_carryover_state(r);
 }
