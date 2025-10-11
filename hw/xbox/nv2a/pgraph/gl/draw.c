@@ -524,7 +524,7 @@ static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
     GLenum new_mode = mode;
     GLsizei new_count = 0;
     const GLuint *u32_indices = (const GLuint *)indices;
-    GLuint new_indices[4];
+    GLuint new_indices[6];
 
     switch (mode) {
     case GL_POINTS:
@@ -583,13 +583,27 @@ static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
         break;
 
     case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
     case GL_QUADS:
+    case GL_QUAD_STRIP:
         assert(count >= 4 && "draw_last_primitive_elements: not enough vertices for primitive");
-        new_count = 3;
+        new_count = 4;
         new_indices[0] = u32_indices[count - 4];
         new_indices[1] = u32_indices[count - 3];
         new_indices[2] = u32_indices[count - 2];
         new_indices[3] = u32_indices[count - 1];
+        break;
+
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        assert(count >= 6 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_count = 6;
+        new_indices[0] = u32_indices[count - 6];
+        new_indices[1] = u32_indices[count - 5];
+        new_indices[2] = u32_indices[count - 4];
+        new_indices[3] = u32_indices[count - 3];
+        new_indices[4] = u32_indices[count - 2];
+        new_indices[5] = u32_indices[count - 1];
         break;
 
     case GL_POLYGON:
@@ -660,10 +674,19 @@ static inline void draw_last_primitive_arrays(GLenum mode, GLint first,
         return;
 
     case GL_LINES_ADJACENCY:
+    case GL_LINE_STRIP_ADJACENCY:
     case GL_QUADS:
+    case GL_QUAD_STRIP:
         assert(count >= 4 && "draw_last_primitive_arrays: not enough vertices for primitive");
         new_first = first + count - 4;
         new_count = 4;
+        break;
+
+    case GL_TRIANGLES_ADJACENCY:
+    case GL_TRIANGLE_STRIP_ADJACENCY:
+        assert(count >= 6 && "draw_last_primitive_arrays: not enough vertices for primitive");
+        new_first = first + count - 6;
+        new_count = 6;
         break;
 
     case GL_POLYGON:
