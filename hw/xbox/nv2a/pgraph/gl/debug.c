@@ -43,11 +43,22 @@
   } \
 } while(0)
 
+static void dump_extensions(void)
+{
+    GLint num_extensions;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
+    for (int i = 0; i < num_extensions; ++i) {
+        const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
+        fprintf(stderr, "GL ext: %s\n", ext);
+    }
+}
+
 static bool has_GL_GREMEDY_frame_terminator = false;
 static bool has_GL_KHR_debug = false;
 
 void gl_debug_initialize(void)
 {
+    dump_extensions();
     has_GL_KHR_debug = glo_check_extension("GL_KHR_debug");
     has_GL_GREMEDY_frame_terminator = glo_check_extension("GL_GREMEDY_frame_terminator");
 
