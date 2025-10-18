@@ -233,7 +233,7 @@ void gl_debug_group_end(void)
             fprintf(stderr, "gl_debug_group_end GL error detected: 0x%X %d\n",
                     err, err);
             gl_debug_dump_log();
-            assert(!"glBeginTransformFeedback failed");
+            assert(!"gl_debug_group_end detected failure");
         }
     }
 

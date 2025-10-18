@@ -847,14 +847,16 @@ void pgraph_gl_flush_draw(NV2AState *d)
         if (pg->compressed_attrs) {
             pg->compressed_attrs = 0;
 
-            GLuint current_program = r->shader_binding->gl_program;
+            // pgraph_gl_bind_shaders may change the bound program, invalidating
+            // the current capture. Since capture is paused, it is safe to
+            // proactively tear it down and restart it, even if the shader is
+            // not changed.
+            teardown_transform_feedback(r, false);
+
             pgraph_gl_bind_shaders(pg);
 
-            if (r->shader_binding->gl_program != current_program) {
-                teardown_transform_feedback(r, false);
-                setup_transform_feedback(r);
-                glPauseTransformFeedback();
-            }
+            setup_transform_feedback(r);
+            glPauseTransformFeedback();
         }
 
         for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
