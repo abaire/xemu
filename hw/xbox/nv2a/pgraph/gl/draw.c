@@ -512,7 +512,8 @@ static inline void setup_transform_feedback(PGRAPHGLState *r)
     }
 }
 
-static inline void teardown_transform_feedback(PGRAPHGLState *r)
+static inline void teardown_transform_feedback(PGRAPHGLState *r,
+                                               bool swap_carryover_buffers)
 {
     glEndTransformFeedback();
     // TODO: Replace with check macro
@@ -528,8 +529,10 @@ static inline void teardown_transform_feedback(PGRAPHGLState *r)
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
     glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
 
-    r->transform_feedback_read_buffer_index =
-        !r->transform_feedback_read_buffer_index;
+    if (swap_carryover_buffers) {
+        r->transform_feedback_read_buffer_index =
+            !r->transform_feedback_read_buffer_index;
+    }
 }
 
 static inline void draw_last_primitive_elements(GLenum mode, GLsizei count,
@@ -775,6 +778,8 @@ void pgraph_gl_flush_draw(NV2AState *d)
     // immediately after the primary rendering.
     // Because only the last vertex is of interest, feedback is immediately
     // paused and only re-enabled for a redraw of the last primitive.
+    //
+    // TODO: RETEST - maybe this was due to shaders being rebound due to compressed attrs?
     setup_transform_feedback(r);
     glPauseTransformFeedback();
 
@@ -841,7 +846,15 @@ void pgraph_gl_flush_draw(NV2AState *d)
 
         if (pg->compressed_attrs) {
             pg->compressed_attrs = 0;
+
+            GLuint current_program = r->shader_binding->gl_program;
             pgraph_gl_bind_shaders(pg);
+
+            if (r->shader_binding->gl_program != current_program) {
+                teardown_transform_feedback(r, false);
+                setup_transform_feedback(r);
+                glPauseTransformFeedback();
+            }
         }
 
         for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
@@ -879,6 +892,6 @@ void pgraph_gl_flush_draw(NV2AState *d)
     }
 
     carryover_registers(d);
-    teardown_transform_feedback(r);
+    teardown_transform_feedback(r, true);
     deactivate_register_carryover_state(r);
 }
