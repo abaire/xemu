@@ -95,6 +95,25 @@ typedef struct UniformInfo {
 
 #define GLSL_DEFINE(a, b) "#define " stringify(a) " " b "\n"
 
+#define DECL_VSH_OUT_REG(prefix, name) \
+    "out vec4 " #prefix "registerState" #name ";\n"
+#define DECL_VSH_OUT_ALIAS(prefix, name) \
+    "#define registerState" #name " " #prefix "registerState" #name "\n"
+#define DECL_VSH_VARYING_REG(_prefix, name) "registerState" #name ,
+
+#define DECL_VSH_REGISTER_STATES(prefix) \
+    DECL_VSH_REG(prefix, Pos)             \
+    DECL_VSH_REG(prefix, D0)              \
+    DECL_VSH_REG(prefix, D1)              \
+    DECL_VSH_REG(prefix, B0)              \
+    DECL_VSH_REG(prefix, B1)              \
+    DECL_VSH_REG(prefix, PointSize)       \
+    DECL_VSH_REG(prefix, Fog)             \
+    DECL_VSH_REG(prefix, T0)              \
+    DECL_VSH_REG(prefix, T1)              \
+    DECL_VSH_REG(prefix, T2)              \
+    DECL_VSH_REG(prefix, T3)
+
 MString *pgraph_glsl_get_vtx_header(MString *out, bool location, bool smooth,
                                     bool in, bool prefix, bool array);
 

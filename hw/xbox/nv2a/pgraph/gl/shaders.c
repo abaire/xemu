@@ -228,7 +228,9 @@ static void generate_shaders(PGRAPHGLState *r, ShaderBinding *binding)
     key.psh.state = state->psh;
     glAttachShader(program, get_shader_module_for_key(r, &key));
 
-    const char *varyings[] = { "registerState" };
+#define DECL_VSH_REG DECL_VSH_VARYING_REG
+    const char *varyings[] = { DECL_VSH_REGISTER_STATES() };
+#undef DECL_VSH_REG
     glTransformFeedbackVaryings(program, ARRAY_SIZE(varyings), varyings,
                                 GL_INTERLEAVED_ATTRIBS);
 

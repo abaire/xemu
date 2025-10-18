@@ -237,24 +237,28 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
     pgraph_glsl_get_vtx_header(header, opts.vulkan, state->smooth_shading,
                                false, opts.prefix_outputs, false);
 
-    if (opts.prefix_outputs) {
-        mstring_append_fmt(header,
-                           "#define vtxD0 v_vtxD0\n"
-                           "#define vtxD1 v_vtxD1\n"
-                           "#define vtxB0 v_vtxB0\n"
-                           "#define vtxB1 v_vtxB1\n"
-                           "#define vtxFog v_vtxFog\n"
-                           "#define vtxT0 v_vtxT0\n"
-                           "#define vtxT1 v_vtxT1\n"
-                           "#define vtxT2 v_vtxT2\n"
-                           "#define vtxT3 v_vtxT3\n"
-                           "out vec4 v_registerState[%d];\n"
-                           "#define registerState v_registerState\n",
-                           NV2A_VSH_OUTPUT_REGISTER_COUNT);
+#define DECL_VSH_REG DECL_VSH_OUT_REG
+    if (!opts.prefix_outputs) {
+        mstring_append(header, DECL_VSH_REGISTER_STATES());
     } else {
-        mstring_append_fmt(header, "out vec4 registerState[%d];\n",
-                           NV2A_VSH_OUTPUT_REGISTER_COUNT);
+        mstring_append(header,
+                       "#define vtxD0 v_vtxD0\n"
+                       "#define vtxD1 v_vtxD1\n"
+                       "#define vtxB0 v_vtxB0\n"
+                       "#define vtxB1 v_vtxB1\n"
+                       "#define vtxFog v_vtxFog\n"
+                       "#define vtxT0 v_vtxT0\n"
+                       "#define vtxT1 v_vtxT1\n"
+                       "#define vtxT2 v_vtxT2\n"
+                       "#define vtxT3 v_vtxT3\n"
+                       DECL_VSH_REGISTER_STATES(v_));
+
+#undef DECL_VSH_REG
+#define DECL_VSH_REG DECL_VSH_OUT_ALIAS
+        mstring_append(header, DECL_VSH_REGISTER_STATES(v_));
     }
+#undef DECL_VSH_REG
+
     mstring_append(header, "\n");
 
     int num_uniform_attrs = 0;
@@ -449,17 +453,17 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
     }
 
     mstring_append(body,
-                   "  registerState[0] = oPos;\n"
-                   "  registerState[1] = vtxD0;\n"
-                   "  registerState[2] = vtxD1;\n"
-                   "  registerState[3] = vtxB0;\n"
-                   "  registerState[4] = vtxB1;\n"
-                   "  registerState[5].x = gl_PointSize;\n"
-                   "  registerState[6] = vshFog;\n"
-                   "  registerState[7] = vtxT0;\n"
-                   "  registerState[8] = vtxT1;\n"
-                   "  registerState[9] = vtxT2;\n"
-                   "  registerState[10] = vtxT3;\n"
+                   "  registerStatePos = oPos;\n"
+                   "  registerStateD0 = vtxD0;\n"
+                   "  registerStateD1 = vtxD1;\n"
+                   "  registerStateB0 = vtxB0;\n"
+                   "  registerStateB1 = vtxB1;\n"
+                   "  registerStatePointSize.x = gl_PointSize;\n"
+                   "  registerStateFog = vshFog;\n"
+                   "  registerStateT0 = vtxT0;\n"
+                   "  registerStateT1 = vtxT1;\n"
+                   "  registerStateT2 = vtxT2;\n"
+                   "  registerStateT3 = vtxT3;\n"
                    "}\n"
                    );
 
