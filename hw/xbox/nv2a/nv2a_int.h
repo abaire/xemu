@@ -210,5 +210,6 @@ DEFINE_PROTO(user)
 DMAObject nv_dma_load(NV2AState *d, hwaddr dma_obj_address);
 void *nv_dma_map(NV2AState *d, hwaddr dma_obj_address, hwaddr *len);
 
+#define NV2A_VSH_OUTPUT_REGISTER_COUNT 11
 
 #endif

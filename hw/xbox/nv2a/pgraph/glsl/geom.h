@@ -40,6 +40,10 @@ void pgraph_glsl_set_geom_state(PGRAPHState *pg, GeomState *geom);
 
 bool pgraph_glsl_need_geom(const GeomState *state);
 
+/** Returns the primitive that will be emitted by the geometry shader. */
+enum ShaderPrimitiveMode
+pgraph_glsl_get_geom_output_primitive(const GeomState *state);
+
 MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts);
 
 #endif
