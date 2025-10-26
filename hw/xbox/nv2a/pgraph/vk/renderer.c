@@ -24,12 +24,14 @@
 
 #if HAVE_EXTERNAL_MEMORY
 static GloContext *g_gl_context;
+static GloContext *g_gpu_props_context = NULL;
 #endif
 
 static void early_context_init(void)
 {
 #if HAVE_EXTERNAL_MEMORY
     g_gl_context = glo_context_create();
+    g_gpu_props_context = glo_context_create();
 #endif
 }
 
@@ -62,6 +64,17 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
 
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
+
+#if HAVE_EXTERNAL_MEMORY
+    assert(g_gpu_props_context && "Invalid GloContext");
+    glo_set_current(g_gpu_props_context);
+#endif
+    pgraph_vk_determine_gpu_properties(d);
+#if HAVE_EXTERNAL_MEMORY
+    glo_context_destroy(g_gpu_props_context);
+    glo_set_current(g_gl_context);
+    g_gpu_props_context = NULL;
+#endif
 }
 
 static void pgraph_vk_finalize(NV2AState *d)
@@ -164,7 +177,7 @@ static void pgraph_vk_pre_shutdown_trigger(NV2AState *d)
 
 static void pgraph_vk_pre_shutdown_wait(NV2AState *d)
 {
-    // qemu_event_wait(&d->pgraph.vk_renderer_state->shader_cache_writeback_complete);   
+    // qemu_event_wait(&d->pgraph.vk_renderer_state->shader_cache_writeback_complete);
 }
 
 static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
@@ -227,6 +240,7 @@ static PGRAPHRenderer pgraph_vk_renderer = {
         .set_surface_scale_factor = pgraph_vk_set_surface_scale_factor,
         .get_surface_scale_factor = pgraph_vk_get_surface_scale_factor,
         .get_framebuffer_surface = pgraph_vk_get_framebuffer_surface,
+        .get_gpu_properties = pgraph_vk_get_gpu_properties,
     }
 };
 

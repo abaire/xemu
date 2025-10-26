@@ -73,6 +73,7 @@ typedef struct TextureBinding {
     unsigned int scale;
     unsigned int min_filter;
     unsigned int mag_filter;
+    uint32_t lod_bias;
     unsigned int addru;
     unsigned int addrv;
     unsigned int addrp;
@@ -233,6 +234,10 @@ typedef struct PGRAPHGLState {
 
     GLfloat supported_aliased_line_width_range[2];
     GLfloat supported_smooth_line_width_range[2];
+
+    struct supported_extensions {
+        GLboolean texture_filter_anisotropic;
+    } supported_extensions;
 } PGRAPHGLState;
 
 extern GloContext *g_nv2a_context_render;
@@ -286,5 +291,7 @@ void pgraph_gl_shader_write_cache_reload_list(PGRAPHState *pg);
 void pgraph_gl_set_surface_scale_factor(NV2AState *d, unsigned int scale);
 unsigned int pgraph_gl_get_surface_scale_factor(NV2AState *d);
 int pgraph_gl_get_framebuffer_surface(NV2AState *d);
+void pgraph_gl_determine_gpu_properties(NV2AState *d, GloContext **context);
+GPUProperties *pgraph_gl_get_gpu_properties(void);
 
 #endif
