@@ -51,6 +51,11 @@ static void process_pending_report(NV2AState *d, QueryReport *report)
         g_free(report->queries);
     }
 
+
+    fprintf(stderr, "Returning ZPassPixelCount report 0x%X = %d (0x%X)\n",
+            report->parameter, r->zpass_pixel_count_result,
+            r->zpass_pixel_count_result);
+
     pgraph_write_zpass_pixel_cnt_report(d, report->parameter, r->zpass_pixel_count_result);
 }
 

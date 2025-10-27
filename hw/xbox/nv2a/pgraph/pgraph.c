@@ -162,30 +162,30 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
     default:
-        // DONOTSUBMIT
-        if (addr == NV_PGRAPH_CTX_SWITCH1) {
-            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH1 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_CACHE1) {
-            fprintf(stderr, "NV_PGRAPH_CTX_CACHE1 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_SWITCH2) {
-            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH2 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_CACHE2) {
-            fprintf(stderr, "NV_PGRAPH_CTX_CACHE2 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_SWITCH3) {
-            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH3 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_CACHE3) {
-            fprintf(stderr, "NV_PGRAPH_CTX_CACHE3 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_SWITCH4) {
-            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH4 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_CACHE4) {
-            fprintf(stderr, "NV_PGRAPH_CTX_CACHE4 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_SWITCH5) {
-            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH5 write 0x{%X}\n", val);
-        } else if (addr == NV_PGRAPH_CTX_CACHE5) {
-            fprintf(stderr, "NV_PGRAPH_CTX_CACHE5 write 0x{%X}\n", val);
-        } else  if (addr != 0x720) {
-            fprintf(stderr, "Write 0x%X to pgraph reg 0x%X\n", val, addr);
-        }
+//        // DONOTSUBMIT
+//        if (addr == NV_PGRAPH_CTX_SWITCH1) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH1 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE1) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE1 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH2) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH2 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE2) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE2 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH3) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH3 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE3) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE3 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH4) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH4 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE4) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE4 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH5) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH5 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE5) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE5 write 0x{%X}\n", val);
+//        } else  if (addr != 0x720) {
+//            fprintf(stderr, "Write 0x%X to pgraph reg 0x%X\n", val, addr);
+//        }
 
         pgraph_reg_w(pg, addr, val);
         break;
@@ -2568,6 +2568,10 @@ DEF_METHOD(NV097, SET_TEXTURE_OFFSET)
 DEF_METHOD(NV097, SET_TEXTURE_FORMAT)
 {
     int slot = (method - NV097_SET_TEXTURE_FORMAT) / 64;
+
+    if (parameter == 0xFF000000) {
+        fprintf(stderr, "Invalid texture format!\n");
+    }
 
     bool dma_select =
         GET_MASK(parameter, NV097_SET_TEXTURE_FORMAT_CONTEXT_DMA) == 2;
