@@ -2271,6 +2271,19 @@ void memory_region_set_log(MemoryRegion *mr, bool log, unsigned client)
     assert((client == DIRTY_MEMORY_VGA) \
         || (client == DIRTY_MEMORY_NV2A) \
         || (client == DIRTY_MEMORY_NV2A_TEX));
+
+    {
+        hwaddr start = mr->addr;
+        hwaddr end = mr->addr + mr->size;
+        if (start <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "memory_region_set_log: 0x%08llx - "
+                    "0x%08llx %d\n",
+                    start, end, log);
+        }
+    }
+
+
     if (mr->alias) {
         memory_region_set_log(mr->alias, log, client);
         return;
@@ -2296,6 +2309,19 @@ void memory_region_set_log(MemoryRegion *mr, bool log, unsigned client)
 void memory_region_set_dirty(MemoryRegion *mr, hwaddr addr,
                              hwaddr size)
 {
+    {
+        hwaddr start = addr;
+        hwaddr end = start + size;
+        if (start <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "memory_region_set_dirty: 0x%08llx - "
+                    "0x%08llx\n",
+                    start, end);
+        }
+    }
+
+
+
     if (mr->alias) {
         return memory_region_set_dirty(mr->alias, addr - mr->alias_offset,
                                        size);
@@ -2309,6 +2335,17 @@ void memory_region_set_dirty(MemoryRegion *mr, hwaddr addr,
 void memory_region_set_client_dirty(MemoryRegion *mr, hwaddr addr,
                                     hwaddr size, unsigned client)
 {
+    {
+        hwaddr start = addr;
+        hwaddr end = start + size;
+        if (start <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "memory_region_set_client_dirty: 0x%08llx - "
+                    "0x%08llx\n",
+                    start, end);
+        }
+    }
+
     if (mr->alias) {
         return memory_region_set_client_dirty(mr->alias,
                                               addr - mr->alias_offset,
@@ -2382,6 +2419,8 @@ void memory_region_clear_dirty_bitmap(MemoryRegion *mr, hwaddr start,
     FlatView *view;
     FlatRange *fr;
     hwaddr sec_start, sec_end, sec_size;
+
+//    fprintf(stderr, "memory_region_clear_dirty_bitmap %08llx - %08llx\n", start, start + len);
 
     QTAILQ_FOREACH(listener, &memory_listeners, link) {
         if (!listener->log_clear) {

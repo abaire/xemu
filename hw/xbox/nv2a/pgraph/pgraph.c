@@ -684,12 +684,12 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4, ctx_4);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5, ctx_5);
 
-        // DONOTSUBMIT
-        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE1 0x%X\n", ctx_1);
-        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE2 0x%X\n", ctx_2);
-        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE3 0x%X\n", ctx_3);
-        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE4 0x%X\n", ctx_4);
-        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE5 0x%X\n", ctx_5);
+//        // DONOTSUBMIT
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE1 0x%X\n", ctx_1);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE2 0x%X\n", ctx_2);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE3 0x%X\n", ctx_3);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE4 0x%X\n", ctx_4);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE5 0x%X\n", ctx_5);
     }
 
     // is this right? - it doesn't seem like it; Steel Battalion explicitly
