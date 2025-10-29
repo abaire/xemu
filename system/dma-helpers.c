@@ -101,6 +101,19 @@ static void dma_complete(DMAAIOCB *dbs, int ret)
 {
     trace_dma_complete(dbs, ret, dbs->common.cb);
 
+    if (dbs->dir == DMA_DIRECTION_FROM_DEVICE) {
+        for (int i = 0; i < dbs->sg->nsg; i++) {
+            dma_addr_t start = dbs->sg->sg[i].base;
+            dma_addr_t end = start + dbs->sg->sg[i].len;
+            if (0x37d8000 >= start && 0x37d8000 < end) {
+                fprintf(stderr,
+                        "DMA read to 0x37d8000 detected: 0x%llx - 0x%llx\n",
+                        start, end);
+                break;
+            }
+        }
+    }
+
     assert(!dbs->acb && !dbs->bh);
     dma_blk_unmap(dbs);
     if (dbs->common.cb) {
@@ -344,4 +357,3 @@ uint64_t dma_aligned_pow2_mask(uint64_t start, uint64_t end, int max_addr_bits)
         return (1ULL << (63 - clz64(addr_mask + 1))) - 1;
     }
 }
-
