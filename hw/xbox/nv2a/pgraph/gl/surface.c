@@ -583,16 +583,17 @@ static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
         snprintf(name, sizeof(name), "nv2a.surface." HWADDR_FMT_plx,
                  surface->vram_addr);
 
-        fprintf(stderr, "!!SURF: Register cpu access callback %s\n", name);
-        bql_lock();
-        assert(!surface->mem_subregion);
-        surface->mem_subregion = g_malloc(sizeof(*surface->mem_subregion));
-        memory_region_init_io(surface->mem_subregion,
-                              NULL/*memory_region_owner(d->vram)*/, &surface_mem_ops,
+//        fprintf(stderr, "!!SURF: Register cpu access callback %s\n", name);
+        assert(!surface->mem_subregion.name &&
+               "mem_subregion reused without clear");
+        memory_region_init_io(&surface->mem_subregion,
+                              memory_region_owner(d->vram), &surface_mem_ops,
                               surface, name, surface->size);
-        memory_region_ref(d->vram);
+        // Note: Priority must be higher than the system memory subregion.
+        // See xbox.c
+        bql_lock();
         memory_region_add_subregion_overlap(d->vram, surface->vram_addr,
-                                            surface->mem_subregion, 0);
+                                            &surface->mem_subregion, 1);
         bql_unlock();
     }
 }
@@ -600,15 +601,13 @@ static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
 static void unregister_cpu_access_callback(NV2AState *d,
                                            SurfaceBinding *surface)
 {
-    if (tcg_enabled() && surface->mem_subregion) {
-        fprintf(stderr, "!!SURF: unregister cpu access callback %s\n", surface->mem_subregion->name);
+    if (tcg_enabled() && surface->mem_subregion.name) {
+//        fprintf(stderr, "!!SURF: unregister cpu access callback %s\n", surface->mem_subregion->name);
 
         bql_lock();
-        memory_region_del_subregion(d->vram, surface->mem_subregion);
-        memory_region_unref(d->vram);
-        memory_region_destroy(surface->mem_subregion);
-        g_free(surface->mem_subregion);
-        surface->mem_subregion = NULL;
+        memory_region_del_subregion(d->vram, &surface->mem_subregion);
+        object_unparent(OBJECT(&surface->mem_subregion));
+        surface->mem_subregion.name = NULL;
         bql_unlock();
     }
 }
@@ -1197,7 +1196,7 @@ static void populate_surface_binding_entry_sized(NV2AState *d, bool color,
     entry->frame_time = pg->frame_time;
     entry->draw_time = pg->draw_time;
     entry->cleared = false;
-    entry->mem_subregion = NULL;
+    entry->mem_subregion.name = NULL;
     entry->nv2a_state = d;
 }
 
