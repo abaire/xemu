@@ -26,7 +26,6 @@
 
 GloContext *g_nv2a_context_render;
 GloContext *g_nv2a_context_display;
-static GloContext *g_gpu_props_context = NULL;
 
 static void early_context_init(void)
 {
