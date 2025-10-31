@@ -40,7 +40,11 @@
 
 typedef struct SurfaceBinding {
     QTAILQ_ENTRY(SurfaceBinding) entry;
-    MemAccessCallback *access_cb;
+
+    // Used to intercept guest CPU/DMA interactions with this surface to
+    // facilitate syncing with GPU buffer.
+    MemoryRegion mem_subregion;
+    NV2AState *nv2a_state;
 
     hwaddr vram_addr;
 
