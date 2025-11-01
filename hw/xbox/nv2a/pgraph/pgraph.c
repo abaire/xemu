@@ -25,6 +25,7 @@
 #include "ui/xemu-notifications.h"
 #include "ui/xemu-settings.h"
 #include "util.h"
+#include "surface_io_interceptor.h"
 #include "swizzle.h"
 #include "nv2a_vsh_emulator.h"
 
@@ -243,6 +244,8 @@ void pgraph_renderer_register(const PGRAPHRenderer *renderer)
 void pgraph_init(NV2AState *d)
 {
     g_nv2a = d;
+
+    sioi_init();
 
     PGRAPHState *pg = &d->pgraph;
     qemu_mutex_init(&pg->lock);
