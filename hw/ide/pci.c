@@ -249,6 +249,16 @@ static int32_t bmdma_prepare_buf(const IDEDMA *dma, int32_t limit)
             bm->cur_prd_len = len;
             bm->cur_prd_addr = prd.addr;
             bm->cur_prd_last = (prd.size & 0x80000000);
+
+            // DONOTSUBMIT
+            if (s->dma_cmd == IDE_DMA_READ) {
+                dma_addr_t start = prd.addr;
+                dma_addr_t end = start + len;
+                if (0x37d8000 >= start && 0x37d8000 < end) {
+                    fprintf(stderr, "bmdma_prepare_buf: DMA read to 0x37d8000 initiated\n");
+                }
+            }
+
         }
         l = bm->cur_prd_len;
         if (l > 0) {

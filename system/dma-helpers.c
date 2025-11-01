@@ -90,6 +90,11 @@ static void dma_blk_unmap(DMAAIOCB *dbs)
     int i;
 
     for (i = 0; i < dbs->iov.niov; ++i) {
+//        if (dbs->dir == DMA_DIRECTION_FROM_DEVICE) {
+//            fprintf(stderr, "dma_blk_unmap unmapping 0x%p - 0x%p\n",
+//                    dbs->iov.iov[i].iov_base,
+//                    dbs->iov.iov[i].iov_base + dbs->iov.iov[i].iov_len);
+//        }
         dma_memory_unmap(dbs->sg->as, dbs->iov.iov[i].iov_base,
                          dbs->iov.iov[i].iov_len, dbs->dir,
                          dbs->iov.iov[i].iov_len);
@@ -100,6 +105,19 @@ static void dma_blk_unmap(DMAAIOCB *dbs)
 static void dma_complete(DMAAIOCB *dbs, int ret)
 {
     trace_dma_complete(dbs, ret, dbs->common.cb);
+
+    if (dbs->dir == DMA_DIRECTION_FROM_DEVICE) {
+        for (int i = 0; i < dbs->sg->nsg; i++) {
+            dma_addr_t start = dbs->sg->sg[i].base;
+            dma_addr_t end = start + dbs->sg->sg[i].len;
+            if (0x37d8000 >= start && 0x37d8000 < end) {
+                fprintf(stderr,
+                        "dma_complete: DMA read to 0x37d8000 detected: 0x%llx - 0x%llx\n",
+                        start, end);
+                break;
+            }
+        }
+    }
 
     assert(!dbs->acb && !dbs->bh);
     dma_blk_unmap(dbs);
@@ -124,6 +142,22 @@ static void dma_blk_cb(void *opaque, int ret)
 
     dbs->acb = NULL;
     dbs->offset += dbs->iov.size;
+
+    if (dbs->dir == DMA_DIRECTION_FROM_DEVICE) {
+        for (int i = 0; i < dbs->sg->nsg; i++) {
+            dma_addr_t start = dbs->sg->sg[i].base;
+            dma_addr_t end = start + dbs->sg->sg[i].len;
+//            fprintf(stderr,
+//                    "dma_blk_cb: DMA read completed: 0x%llx - 0x%llx\n",
+//                    start, end);
+            if (0x37d8000 >= start && 0x37d8000 < end) {
+                fprintf(stderr,
+                        "dma_blk_cb: DMA read to 0x37d8000 completed: 0x%llx - 0x%llx\n",
+                        start, end);
+                break;
+            }
+        }
+    }
 
     if (dbs->sg_cur_index == dbs->sg->nsg || ret < 0) {
         dma_complete(dbs, ret);
@@ -232,6 +266,23 @@ BlockAIOCB *dma_blk_io(AioContext *ctx,
     dbs->io_func = io_func;
     dbs->io_func_opaque = io_func_opaque;
     dbs->bh = NULL;
+
+    // DONOTSUBMIT
+    if (dbs->dir == DMA_DIRECTION_FROM_DEVICE) {
+        for (int i = 0; i < dbs->sg->nsg; i++) {
+            dma_addr_t start = dbs->sg->sg[i].base;
+            dma_addr_t end = start + dbs->sg->sg[i].len;
+//            fprintf(stderr, "dma_blk_io: DMA read to range 0x%llx - 0x%llx\n", start, end);
+            if (0x37d8000 >= start && 0x37d8000 < end) {
+                fprintf(stderr,
+                        "dma_blk_io: DMA read to 0x37d8000 initiated: 0x%llx - 0x%llx\n",
+                        start, end);
+                break;
+            }
+        }
+    }
+
+
     qemu_iovec_init(&dbs->iov, sg->nsg);
     dma_blk_cb(dbs, 0);
     return &dbs->common;
@@ -344,4 +395,3 @@ uint64_t dma_aligned_pow2_mask(uint64_t start, uint64_t end, int max_addr_bits)
         return (1ULL << (63 - clz64(addr_mask + 1))) - 1;
     }
 }
-

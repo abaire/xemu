@@ -22,6 +22,7 @@
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/nv2a_int.h"
+#include "hw/xbox/nv2a/pgraph/surface_io_interceptor.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "debug.h"
 #include "renderer.h"
@@ -421,66 +422,127 @@ static bool check_surface_overlaps_range(const SurfaceBinding *surface,
     return !(surface->vram_addr >= range_end || range_start >= surface_end);
 }
 
-static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
-                                    hwaddr len, bool write)
+static void wait_for_surface_downloads(NV2AState *d)
 {
-    NV2AState *d = (NV2AState *)opaque;
-    qemu_mutex_lock(&d->pgraph.lock);
-
     PGRAPHGLState *r = d->pgraph.gl_renderer_state;
-    bool wait_for_downloads = false;
+    qemu_mutex_lock(&d->pfifo.lock);
+    qemu_event_reset(&r->downloads_complete);
+    qatomic_set(&r->downloads_pending, true);
+    pfifo_kick(d);
+    qemu_mutex_unlock(&d->pfifo.lock);
+    qemu_event_wait(&r->downloads_complete);
+}
 
-    SurfaceBinding *surface;
-    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
-        if (!check_surface_overlaps_range(surface, addr, len)) {
-            continue;
-        }
+static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
+{
+    SurfaceIOInterceptorContext *context = (SurfaceIOInterceptorContext*)opaque;
+    NV2AState *d = context->state;
+    SurfaceBinding *surface = (SurfaceBinding *)context->opaque;
 
-        hwaddr offset = addr - surface->vram_addr;
+//    fprintf(stderr,
+//            "!!SURF: Read from surface target at " HWADDR_FMT_plx
+//            " " HWADDR_FMT_plx "\n",
+//            addr, surface->vram_addr);
 
-        if (write) {
-            trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, offset);
-        } else {
-            trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
-        }
+    trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, addr);
 
-        if (surface->draw_dirty) {
-            surface->download_pending = true;
-            wait_for_downloads = true;
-        }
-
-        if (write) {
-            surface->upload_pending = true;
-        }
-    }
-
+    qemu_mutex_lock(&d->pgraph.lock);
+    bool wait_for_downloads = surface->draw_dirty;
     qemu_mutex_unlock(&d->pgraph.lock);
 
-    if (wait_for_downloads) {
-        qemu_mutex_lock(&d->pfifo.lock);
-        qemu_event_reset(&r->downloads_complete);
-        qatomic_set(&r->downloads_pending, true);
-        pfifo_kick(d);
-        qemu_mutex_unlock(&d->pfifo.lock);
-        qemu_event_wait(&r->downloads_complete);
+    //DONOTSUBMIT
+//    if (wait_for_downloads) {
+//        surface->download_pending = true;
+//        wait_for_surface_downloads(d);
+//    }
+
+    void *ram_ptr = memory_region_get_ram_ptr(d->vram);
+    ram_ptr += surface->vram_addr + addr;
+
+    switch (size) {
+    case 1:
+        return ldub_p(ram_ptr);
+
+    case 2:
+        return lduw_le_p(ram_ptr);
+
+    case 4:
+        return ldl_le_p(ram_ptr);
+
+    case 8:
+        return ldq_le_p(ram_ptr);
+
+    default:
+        assert(!"Invalid read size");
+        return 0;
+    }
+
+    return 0;
+}
+
+static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
+{
+    SurfaceIOInterceptorContext *context = (SurfaceIOInterceptorContext*)opaque;
+    NV2AState *d = context->state;
+    SurfaceBinding *surface = (SurfaceBinding *)context->opaque;
+
+    trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, addr);
+
+    bool wait_for_downloads = false;
+    if (qatomic_read(&surface->draw_dirty)) {
+        qatomic_set(&surface->download_pending, true);
+        wait_for_downloads = true;
+    }
+
+    // DONOTSUBMIT
+//    if (wait_for_downloads) {
+//        wait_for_surface_downloads(d);
+//    }
+
+    qatomic_set(&surface->upload_pending, true);
+
+    void *ram_ptr = memory_region_get_ram_ptr(d->vram);
+    ram_ptr += surface->vram_addr + addr;
+
+    switch (size) {
+    case 1:
+        stb_p(ram_ptr, data);
+        break;
+    case 2:
+        stw_le_p(ram_ptr, data);
+        break;
+    case 4:
+        stl_le_p(ram_ptr, data);
+        break;
+    case 8:
+        stq_le_p(ram_ptr, data);
+        break;
+    default:
+        assert(!"invalid write size");
     }
 }
+
+static const MemoryRegionOps surface_mem_ops = {
+    .read = surface_mem_read,
+    .write = surface_mem_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 8,
+        .unaligned = false,
+        .accepts = NULL,
+    },
+};
 
 static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
 {
-    if (tcg_enabled()) {
-        surface->access_cb = mem_access_callback_insert(
-            qemu_get_cpu(0), d->vram, surface->vram_addr, surface->size,
-            &surface_access_callback, d);
-    }
+    sioi_claim(d, &surface_mem_ops, surface, surface->vram_addr, surface->size);
 }
 
 static void unregister_cpu_access_callback(NV2AState *d,
-                                           SurfaceBinding const *surface)
+                                           SurfaceBinding *surface)
 {
-    if (tcg_enabled()) {
-        mem_access_callback_remove_by_ref(qemu_get_cpu(0), surface->access_cb);
-    }
+    sioi_release(surface, surface->vram_addr);
 }
 
 static bool check_surfaces_overlap(const SurfaceBinding *surface,
@@ -684,6 +746,16 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     swizzle &= surface->swizzle;
     downscale &= (pg->surface_scale_factor != 1);
 
+    {
+        hwaddr end = surface->vram_addr + surface->pitch * surface->height;
+        fprintf(stderr, "surface_download_to_buffer: 0x%llx - 0x%llx\n",
+                surface->vram_addr, end);
+
+//        if (surface->vram_addr <= 0x37d8000 && end >= 0x37d8000) {
+//            fprintf(stderr, "surface_download_to_buffer: 0x%llx - 0x%llx\n",
+//                    surface->vram_addr, end);
+//        }
+    }
     trace_nv2a_pgraph_surface_download(
         surface->color ? "COLOR" : "ZETA",
         surface->swizzle ? "sz" : "lin", surface->vram_addr,

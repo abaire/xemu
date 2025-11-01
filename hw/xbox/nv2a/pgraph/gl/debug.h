@@ -31,12 +31,15 @@
 #include "gloffscreen.h"
 #include "config-host.h"
 
+extern uint32_t g_nv2a_current_frame_draw_count;  // abaire
+
 void gl_debug_initialize(void);
 void gl_debug_message(bool cc, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
 void gl_debug_group_begin(const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
 void gl_debug_group_end(void);
 void gl_debug_label(GLenum target, GLuint name, const char *fmt, ...) __attribute__ ((format (printf, 3, 4)));
 void gl_debug_frame_terminator(void);
+void gl_debug_dump_log(void);
 
 # define NV2A_GL_DPRINTF(cc, format, ...) \
     gl_debug_message(cc, "nv2a: " format, ## __VA_ARGS__)

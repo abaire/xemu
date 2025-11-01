@@ -25,6 +25,7 @@
 #include "ui/xemu-notifications.h"
 #include "ui/xemu-settings.h"
 #include "util.h"
+#include "surface_io_interceptor.h"
 #include "swizzle.h"
 #include "nv2a_vsh_emulator.h"
 
@@ -162,6 +163,31 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
     default:
+//        // DONOTSUBMIT
+//        if (addr == NV_PGRAPH_CTX_SWITCH1) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH1 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE1) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE1 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH2) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH2 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE2) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE2 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH3) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH3 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE3) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE3 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH4) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH4 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE4) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE4 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_SWITCH5) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_SWITCH5 write 0x{%X}\n", val);
+//        } else if (addr == NV_PGRAPH_CTX_CACHE5) {
+//            fprintf(stderr, "NV_PGRAPH_CTX_CACHE5 write 0x{%X}\n", val);
+//        } else  if (addr != 0x720) {
+//            fprintf(stderr, "Write 0x%X to pgraph reg 0x%X\n", val, addr);
+//        }
+
         pgraph_reg_w(pg, addr, val);
         break;
     }
@@ -218,6 +244,8 @@ void pgraph_renderer_register(const PGRAPHRenderer *renderer)
 void pgraph_init(NV2AState *d)
 {
     g_nv2a = d;
+
+    sioi_init();
 
     PGRAPHState *pg = &d->pgraph;
     qemu_mutex_init(&pg->lock);
@@ -652,19 +680,38 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4, ctx_3);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4, ctx_4);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4, ctx_5);
+
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1, ctx_1);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2, ctx_2);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3, ctx_3);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4, ctx_4);
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5, ctx_5);
+
+//        // DONOTSUBMIT
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE1 0x%X\n", ctx_1);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE2 0x%X\n", ctx_2);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE3 0x%X\n", ctx_3);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE4 0x%X\n", ctx_4);
+//        fprintf(stderr, "NV_SET_OBJECT: resetting NV_PGRAPH_CTX_CACHE5 0x%X\n", ctx_5);
     }
 
-    // is this right?
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE1 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE2 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4));
+    // is this right? - it doesn't seem like it; Steel Battalion explicitly
+    // disables CTX_SWITCH1 before sending some invalid commands and does not
+    // modify CTX_CACHE1
+#define LOAD_CTX_CACHE(index) \
+    if (PG_GET_MASK(NV_PGRAPH_CTX_SWITCH ## index, \
+                    NV_PGRAPH_CTX_SWITCH1_GRCLASS)) { \
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH ## index, \
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE ## index + subchannel * 4)); \
+    }
+
+    LOAD_CTX_CACHE(1)
+    LOAD_CTX_CACHE(2)
+    LOAD_CTX_CACHE(3)
+    LOAD_CTX_CACHE(4)
+    LOAD_CTX_CACHE(5)
+
+#undef LOAD_CTX_CACHE
 
     uint32_t graphics_class = PG_GET_MASK(NV_PGRAPH_CTX_SWITCH1,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
@@ -2524,6 +2571,10 @@ DEF_METHOD(NV097, SET_TEXTURE_OFFSET)
 DEF_METHOD(NV097, SET_TEXTURE_FORMAT)
 {
     int slot = (method - NV097_SET_TEXTURE_FORMAT) / 64;
+
+    if (parameter == 0xFF000000) {
+        fprintf(stderr, "Invalid texture format!\n");
+    }
 
     bool dma_select =
         GET_MASK(parameter, NV097_SET_TEXTURE_FORMAT_CONTEXT_DMA) == 2;

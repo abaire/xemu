@@ -40,7 +40,6 @@
 
 typedef struct SurfaceBinding {
     QTAILQ_ENTRY(SurfaceBinding) entry;
-    MemAccessCallback *access_cb;
 
     hwaddr vram_addr;
 

@@ -828,7 +828,7 @@ int mem_access_callback_address_matches(CPUState *cpu, hwaddr addr, hwaddr len)
     int ret = 0;
 
     MemAccessCallback *cb;
-    QTAILQ_FOREACH(cb, &cpu->mem_access_callbacks, entry) {
+    QTAILQ_FOREACH (cb, &cpu->mem_access_callbacks, entry) {
         if (access_callback_address_matches(cb, addr, len)) {
             ret |= BP_MEM_READ | BP_MEM_WRITE;
         }
@@ -884,20 +884,30 @@ void mem_access_callback_remove_by_ref(CPUState *cpu, MemAccessCallback *cb)
     tlb_flush_all_cpus_synced(cpu);
 }
 
-void mem_check_access_callback_vaddr(CPUState *cpu,
-                                     vaddr addr, vaddr len, int flags,
-                                     void *tlbentryfull)
+void mem_check_access_callback_vaddr(CPUState *cpu, vaddr addr, vaddr len,
+                                     int flags, void *tlbentryfull)
 {
-    ram_addr_t ram_addr = (((CPUTLBEntryFull *)tlbentryfull)->xlat_section
-                           & TARGET_PAGE_MASK) + addr;
+    {
+        vaddr end = addr + len;
+        if (addr <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "mem_check_access_callback_vaddr: 0x%08llx - "
+                    "0x%08llx\n",
+                    addr, end);
+        }
+    }
+
+    ram_addr_t ram_addr =
+        (((CPUTLBEntryFull *)tlbentryfull)->xlat_section & TARGET_PAGE_MASK) +
+        addr;
     mem_check_access_callback_ramaddr(cpu, ram_addr, len, flags);
 }
 
-void mem_check_access_callback_ramaddr(CPUState *cpu,
-                                       hwaddr ram_addr, vaddr len, int flags)
+void mem_check_access_callback_ramaddr(CPUState *cpu, hwaddr ram_addr,
+                                       vaddr len, int flags)
 {
     MemAccessCallback *cb;
-    QTAILQ_FOREACH(cb, &cpu->mem_access_callbacks, entry) {
+    QTAILQ_FOREACH (cb, &cpu->mem_access_callbacks, entry) {
         if (access_callback_address_matches(cb, ram_addr, len)) {
             ram_addr_t ram_addr_base = memory_region_get_ram_addr(cb->mr);
             assert(ram_addr_base != RAM_ADDR_INVALID);
@@ -988,6 +998,15 @@ bool cpu_physical_memory_test_and_clear_dirty(ram_addr_t start,
     end = TARGET_PAGE_ALIGN(start + length) >> TARGET_PAGE_BITS;
     start_page = start >> TARGET_PAGE_BITS;
     page = start_page;
+
+    {
+        if (start <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "cpu_physical_memory_test_and_clear_dirty: 0x%08llx - "
+                    "0x%08llx\n",
+                    start, start + length);
+        }
+    }
 
     WITH_RCU_READ_LOCK_GUARD() {
         blocks = qatomic_rcu_read(&ram_list.dirty_memory[client]);
@@ -3670,6 +3689,16 @@ int cpu_memory_rw_debug(CPUState *cpu, vaddr addr,
     hwaddr phys_addr;
     vaddr l, page;
     uint8_t *buf = ptr;
+
+    {
+        vaddr end = addr + len;
+        if (addr <= 0x837d8000 && end >= 0x837d8000) {
+            fprintf(stderr,
+                    "cpu_memory_rw_debug: 0x%08llx - "
+                    "0x%08llx\n",
+                    addr, end);
+        }
+    }
 
     cpu_synchronize_state(cpu);
     while (len > 0) {
