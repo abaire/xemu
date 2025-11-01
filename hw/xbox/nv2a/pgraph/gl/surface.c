@@ -22,6 +22,7 @@
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/nv2a_int.h"
+#include "hw/xbox/nv2a/pgraph/surface_io_interceptor.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "debug.h"
 #include "renderer.h"
@@ -421,53 +422,9 @@ static bool check_surface_overlaps_range(const SurfaceBinding *surface,
     return !(surface->vram_addr >= range_end || range_start >= surface_end);
 }
 
-//static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
-//                                    hwaddr len, bool write)
-//{
-//    NV2AState *d = (NV2AState *)opaque;
-//    qemu_mutex_lock(&d->pgraph.lock);
-//
-//    PGRAPHGLState *r = d->pgraph.gl_renderer_state;
-//    bool wait_for_downloads = false;
-//
-//    SurfaceBinding *surface;
-//    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
-//        if (!check_surface_overlaps_range(surface, addr, len)) {
-//            continue;
-//        }
-//
-//        hwaddr offset = addr - surface->vram_addr;
-//
-//        if (write) {
-//            trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, offset);
-//        } else {
-//            trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
-//        }
-//
-//        if (surface->draw_dirty) {
-//            surface->download_pending = true;
-//            wait_for_downloads = true;
-//        }
-//
-//        if (write) {
-//            surface->upload_pending = true;
-//        }
-//    }
-//
-//    qemu_mutex_unlock(&d->pgraph.lock);
-//
-//    if (wait_for_downloads) {
-//        qemu_mutex_lock(&d->pfifo.lock);
-//        qemu_event_reset(&r->downloads_complete);
-//        qatomic_set(&r->downloads_pending, true);
-//        pfifo_kick(d);
-//        qemu_mutex_unlock(&d->pfifo.lock);
-//        qemu_event_wait(&r->downloads_complete);
-//    }
-//}
-
 static void wait_for_surface_downloads(NV2AState *d)
 {
+    bql_unlock();
     PGRAPHGLState *r = d->pgraph.gl_renderer_state;
     qemu_mutex_lock(&d->pfifo.lock);
     qemu_event_reset(&r->downloads_complete);
@@ -475,12 +432,14 @@ static void wait_for_surface_downloads(NV2AState *d)
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&r->downloads_complete);
+    bql_lock();
 }
 
 static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
 {
-    SurfaceBinding *surface = (SurfaceBinding *)opaque;
-    NV2AState *d = surface->nv2a_state;
+    SurfaceIOInterceptorContext *context = (SurfaceIOInterceptorContext*)opaque;
+    NV2AState *d = context->state;
+    SurfaceBinding *surface = (SurfaceBinding *)context->opaque;
 
 //    fprintf(stderr,
 //            "!!SURF: Read from surface target at " HWADDR_FMT_plx
@@ -489,9 +448,7 @@ static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
 
     trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, addr);
 
-    qemu_mutex_lock(&d->pgraph.lock);
-    bool wait_for_downloads = surface->draw_dirty;
-    qemu_mutex_unlock(&d->pgraph.lock);
+    bool wait_for_downloads = qatomic_read(&surface->draw_dirty);
 
     if (wait_for_downloads) {
         surface->download_pending = true;
@@ -524,24 +481,23 @@ static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
 
 static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
 {
-    SurfaceBinding *surface = (SurfaceBinding *)opaque;
-    NV2AState *d = surface->nv2a_state;
+    SurfaceIOInterceptorContext *context = (SurfaceIOInterceptorContext*)opaque;
+    NV2AState *d = context->state;
+    SurfaceBinding *surface = (SurfaceBinding *)context->opaque;
+
     trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, addr);
 
-    qemu_mutex_lock(&d->pgraph.lock);
-
     bool wait_for_downloads = false;
-    if (surface->draw_dirty) {
-        surface->download_pending = true;
+    if (qatomic_read(&surface->draw_dirty)) {
+        qatomic_set(&surface->download_pending, true);
         wait_for_downloads = true;
     }
-    surface->upload_pending = true;
-
-    qemu_mutex_unlock(&d->pgraph.lock);
 
     if (wait_for_downloads) {
         wait_for_surface_downloads(d);
     }
+
+    qatomic_set(&surface->upload_pending, true);
 
     void *ram_ptr = memory_region_get_ram_ptr(d->vram);
     ram_ptr += surface->vram_addr + addr;
@@ -578,38 +534,13 @@ static const MemoryRegionOps surface_mem_ops = {
 
 static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
 {
-    if (tcg_enabled()) {
-        char name[64];
-        snprintf(name, sizeof(name), "nv2a.surface." HWADDR_FMT_plx,
-                 surface->vram_addr);
-
-//        fprintf(stderr, "!!SURF: Register cpu access callback %s\n", name);
-        assert(!surface->mem_subregion.name &&
-               "mem_subregion reused without clear");
-        memory_region_init_io(&surface->mem_subregion,
-                              memory_region_owner(d->vram), &surface_mem_ops,
-                              surface, name, surface->size);
-        // Note: Priority must be higher than the system memory subregion.
-        // See xbox.c
-        bql_lock();
-        memory_region_add_subregion_overlap(d->vram, surface->vram_addr,
-                                            &surface->mem_subregion, 1);
-        bql_unlock();
-    }
+    sioi_claim(d, &surface_mem_ops, surface, surface->vram_addr, surface->size);
 }
 
 static void unregister_cpu_access_callback(NV2AState *d,
                                            SurfaceBinding *surface)
 {
-    if (tcg_enabled() && surface->mem_subregion.name) {
-//        fprintf(stderr, "!!SURF: unregister cpu access callback %s\n", surface->mem_subregion->name);
-
-        bql_lock();
-        memory_region_del_subregion(d->vram, &surface->mem_subregion);
-        object_unparent(OBJECT(&surface->mem_subregion));
-        surface->mem_subregion.name = NULL;
-        bql_unlock();
-    }
+    sioi_release(surface, surface->vram_addr);
 }
 
 static bool check_surfaces_overlap(const SurfaceBinding *surface,
@@ -904,7 +835,7 @@ static void surface_download(NV2AState *d, SurfaceBinding *surface, bool force)
                                    DIRTY_MEMORY_NV2A_TEX);
 
     surface->download_pending = false;
-    surface->draw_dirty = false;
+    qatomic_set(&surface->draw_dirty, false);
 }
 
 void pgraph_gl_process_pending_downloads(NV2AState *d)
@@ -1186,8 +1117,6 @@ static void populate_surface_binding_entry_sized(NV2AState *d, bool color,
     entry->frame_time = pg->frame_time;
     entry->draw_time = pg->draw_time;
     entry->cleared = false;
-    entry->mem_subregion.name = NULL;
-    entry->nv2a_state = d;
 }
 
 static void populate_surface_binding_entry(NV2AState *d, bool color,
@@ -1391,7 +1320,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
         surface->buffer_dirty = false;
     }
 
-    if (!upload && surface->draw_dirty) {
+    if (!upload && qatomic_read(&surface->draw_dirty)) {
         if (!tcg_enabled()) {
             /* FIXME: Cannot monitor for reads/writes; flush now */
             surface_download(d,
@@ -1401,7 +1330,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
         }
 
         surface->write_enabled_cache = false;
-        surface->draw_dirty = false;
+        qatomic_set(&surface->draw_dirty, false);
     }
 }
 
