@@ -13,6 +13,7 @@ on:
       - '!.github/workflows/build.yml'
       - 'README.md'
       - 'ubuntu-win64-cross/**'
+  workflow_dispatch:
 
 jobs:
   Init:
@@ -27,7 +28,7 @@ jobs:
       run: sudo apt-get install meson
     # On push to master, increment patch version and create a new tag on release
     - name: Increment patch version
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: github.event.repository.fork == false && github.event_name == 'push' && github.ref == 'refs/heads/master'
       run: |
         git config user.name "nobody"
         git config user.email "nobody@nowhere"
@@ -38,7 +39,7 @@ jobs:
     # new tag. Recreate it as an annotated tag now so the version script picks
     # it up properly.
     - name: Annotate release tag
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      if: github.event.repository.fork == false && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       run: |
         git config user.name "nobody"
         git config user.email "nobody@nowhere"
@@ -62,21 +63,21 @@ jobs:
     strategy:
       matrix:
         include:
-        - configuration: Debug
-          build_param: --debug
-          artifact_name: xemu-win-x86_64-debug
+        - configuration: DebugRenderDoc
+          build_param:  --debug --enable-renderdoc
+          artifact_name: xemu-win-x86_64-debugrenderdoc
           arch: x86_64
-        - configuration: Release
-          build_param:
-          artifact_name: xemu-win-x86_64-release
+        - configuration: ReleaseRenderDoc
+          build_param: --enable-renderdoc
+          artifact_name: xemu-win-x86_64-releaserenderdoc
           arch: x86_64
-        - configuration: Debug
-          build_param: --debug
-          artifact_name: xemu-win-aarch64-debug
+        - configuration: DebugRenderDoc
+          build_param:  --debug --enable-renderdoc
+          artifact_name: xemu-win-aarch64-debugrenderdoc
           arch: aarch64
-        - configuration: Release
-          build_param:
-          artifact_name: xemu-win-aarch64-release
+        - configuration: ReleaseRenderDoc
+          build_param: --enable-renderdoc
+          artifact_name: xemu-win-aarch64-releaserenderdoc
           arch: aarch64
     env:
       DOCKER_IMAGE_NAME: ghcr.io/xemu-project/xemu-win64-toolchain:sha-0d06ce8
@@ -109,7 +110,7 @@ jobs:
           -e CROSSAR=${{ matrix.arch }}-w64-mingw32.static-ar \
           -u $(id -u):$(id -g) \
           $DOCKER_IMAGE_NAME \
-            bash -c "ccache -z; ./build.sh -p win64-cross ${{ matrix.build_param }} && ccache -s"
+            bash -c "ccache -z;export CFLAGS=\"${CFLAGS} -DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1\"; ./build.sh -p win64-cross ${{ matrix.build_param }} && ccache -s"
     - name: Upload build artifact
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4
       with:
@@ -127,16 +128,16 @@ jobs:
       matrix:
         include:
         - configuration: Debug
-          artifact_name: xemu-win-x86_64-debug
+          artifact_name: xemu-win-x86_64-debugrenderdoc
           arch: x86_64
         - configuration: Release
-          artifact_name: xemu-win-x86_64-release
+          artifact_name: xemu-win-x86_64-releaserenderdoc
           arch: x86_64
         - configuration: Debug
-          artifact_name: xemu-win-aarch64-debug
+          artifact_name: xemu-win-aarch64-debugrenderdoc
           arch: aarch64
         - configuration: Release
-          artifact_name: xemu-win-aarch64-release
+          artifact_name: xemu-win-aarch64-releaserenderdoc
           arch: aarch64
     steps:
     - name: Download artifacts
@@ -170,28 +171,28 @@ jobs:
       matrix:
         include:
         - arch: x86_64
-          configuration: Debug
-          build_param: --debug
-          artifact_name: xemu-ubuntu-x86_64-debug
-          artifact_filename: xemu-ubuntu-x86_64-debug.tgz
+          configuration: DebugRenderDoc
+          build_param: --debug --enable-renderdoc
+          artifact_name: xemu-ubuntu-x86_64-debugrenderdoc
+          artifact_filename: xemu-ubuntu-x86_64-debugrenderdoc.tgz
           runs-on: ubuntu-22.04
         - arch: x86_64
-          configuration: Release
-          build_param:
-          artifact_name: xemu-ubuntu-x86_64-release
-          artifact_filename: xemu-ubuntu-x86_64-release.tgz
+          configuration: ReleaseRenderDoc
+          build_param: --enable-renderdoc
+          artifact_name: xemu-ubuntu-x86_64-releaserenderdoc
+          artifact_filename: xemu-ubuntu-x86_64-releaserenderdoc.tgz
           runs-on: ubuntu-22.04
         - arch: aarch64
-          configuration: Debug
-          build_param: --debug
-          artifact_name: xemu-ubuntu-aarch64-debug
-          artifact_filename: xemu-ubuntu-aarch64-debug.tgz
-          runs-on: ubuntu-22.04-arm
+          configuration: DebugRenderDoc
+          build_param: --debug --enable-renderdoc
+          artifact_name: xemu-ubuntu-aarch64-debugrenderdoc
+          artifact_filename: xemu-ubuntu-aarch64-debugrenderdoc.tgz
+          runs-on: ubuntu-24.02-arm
         - arch: aarch64
-          configuration: Release
-          build_param:
-          artifact_name: xemu-ubuntu-aarch64-release
-          artifact_filename: xemu-ubuntu-aarch64-release.tgz
+          configuration: ReleaseRenderDoc
+          build_param: --enable-renderdoc
+          artifact_name: xemu-ubuntu-aarch64-releaserenderdoc
+          artifact_filename: xemu-ubuntu-aarch64-releaserenderdoc.tgz
           runs-on: ubuntu-22.04-arm
     steps:
     - name: Initialize compiler cache
@@ -229,6 +230,7 @@ jobs:
         export CCACHE_DIR=/tmp/xemu-ccache
         export CCACHE_MAXSIZE=512M
         export PATH="/usr/lib/ccache:$PATH"
+        export CFLAGS="-DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1"
         export XEMU_BUILD_OPTIONS="${{ matrix.build_param }}"
         ccache -z
 
@@ -260,7 +262,7 @@ jobs:
         tar -C appimage -xf data.tar*
         install -DT src/xemu.metainfo.xml appimage/usr/share/metainfo/xemu.metainfo.xml
 
-        export VERSION=v$(cat src/XEMU_VERSION)
+        export VERSION=v$(cat src/XEMU_VERSION)-abaire
         if [[ "${{ matrix.configuration }}" == "Debug" ]]; then
           export VERSION=$VERSION-dbg
         fi
@@ -284,25 +286,25 @@ jobs:
       matrix:
         include:
         - arch: x86_64
-          configuration: Debug
-          build_param: --debug -a x86_64
-          artifact_name: xemu-macos-x86_64-debug
-          artifact_filename: xemu-macos-x86_64-debug.zip
+          configuration: DebugRenderDoc
+          build_param: --debug -a x86_64 --enable-renderdoc
+          artifact_name: xemu-macos-x86_64-debugrenderdoc
+          artifact_filename: xemu-macos-x86_64-debugrenderdoc.zip
         - arch: x86_64
-          configuration: Release
-          build_param: -a x86_64
-          artifact_name: xemu-macos-x86_64-release
-          artifact_filename: xemu-macos-x86_64-release.zip
+          configuration: ReleaseRenderDoc
+          build_param: -a x86_64 --enable-renderdoc
+          artifact_name: xemu-macos-x86_64-releaserenderdoc
+          artifact_filename: xemu-macos-x86_64-releaserenderdoc.zip
         - arch: arm64
-          configuration: Debug
-          build_param: --debug -a arm64
-          artifact_name: xemu-macos-arm64-debug
-          artifact_filename: xemu-macos-arm64-debug.zip
+          configuration: DebugRenderDoc
+          build_param: --debug -a arm64 --enable-renderdoc
+          artifact_name: xemu-macos-arm64-debugrenderdoc
+          artifact_filename: xemu-macos-arm64-debugrenderdoc.zip
         - arch: arm64
-          configuration: Release
-          build_param: -a arm64
-          artifact_name: xemu-macos-arm64-release
-          artifact_filename: xemu-macos-arm64-release.zip
+          configuration: ReleaseRenderDoc
+          build_param: -a arm64 --enable-renderdoc
+          artifact_name: xemu-macos-arm64-releaserenderdoc
+          artifact_filename: xemu-macos-arm64-releaserenderdoc.zip
     steps:
     - name: Download source package
       uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v4
@@ -336,6 +338,7 @@ jobs:
         export CCACHE_DIR=${GITHUB_WORKSPACE}/xemu-ccache
         export CCACHE_MAXSIZE=512M
         export PATH="/usr/local/opt/ccache/libexec:$PATH"
+        export CFLAGS="-DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1"
         ccache -z
         ./build.sh ${{ matrix.build_param }}
         echo -e "\nCompiler Cache Stats:"
@@ -360,40 +363,40 @@ jobs:
     - name: Download x86_64 build
       uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v4
       with:
-        name: xemu-macos-x86_64-${{ matrix.configuration }}
-        path: xemu-macos-x86_64-${{ matrix.configuration }}
+        name: xemu-macos-x86_64-${{ matrix.configuration }}renderdoc
+        path: xemu-macos-x86_64-${{ matrix.configuration }}renderdoc
     - name: Download arm64 build
       uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v4
       with:
-        name: xemu-macos-arm64-${{ matrix.configuration }}
-        path: xemu-macos-arm64-${{ matrix.configuration }}
+        name: xemu-macos-arm64-${{ matrix.configuration }}renderdoc
+        path: xemu-macos-arm64-${{ matrix.configuration }}renderdoc
     - name: Build Universal bundle
       run: |
         mkdir dist
         for arch in x86_64 arm64; do
-          pushd xemu-macos-${arch}-${{ matrix.configuration }}
-          unzip xemu-macos-${arch}-${{ matrix.configuration }}.zip
+          pushd xemu-macos-${arch}-${{ matrix.configuration }}renderdoc
+          unzip xemu-macos-${arch}-${{ matrix.configuration }}renderdoc.zip
           popd
           pushd dist
-          unzip -o ../xemu-macos-${arch}-${{ matrix.configuration }}/xemu-macos-${arch}-${{ matrix.configuration }}.zip
+          unzip -o ../xemu-macos-${arch}-${{ matrix.configuration }}renderdoc/xemu-macos-${arch}-${{ matrix.configuration }}renderdoc.zip
           popd
         done
         pushd dist
         rm xemu.app/Contents/MacOS/xemu
         lipo -create -output xemu.app/Contents/MacOS/xemu \
-          ../xemu-macos-x86_64-${{ matrix.configuration }}/xemu.app/Contents/MacOS/xemu \
-          ../xemu-macos-arm64-${{ matrix.configuration }}/xemu.app/Contents/MacOS/xemu
+          ../xemu-macos-x86_64-${{ matrix.configuration }}renderdoc/xemu.app/Contents/MacOS/xemu \
+          ../xemu-macos-arm64-${{ matrix.configuration }}renderdoc/xemu.app/Contents/MacOS/xemu
         codesign --force --deep --preserve-metadata=entitlements,requirements,flags,runtime --sign - xemu.app/Contents/MacOS/xemu
-        zip -r ../xemu-macos-universal-${{ matrix.configuration }}.zip *
+        zip -r ../xemu-macos-universal-${{ matrix.configuration }}renderdoc.zip *
         popd
     - name: Upload build artifact
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4
       with:
-        name: xemu-macos-universal-${{ matrix.configuration }}
-        path: xemu-macos-universal-${{ matrix.configuration }}.zip
+        name: xemu-macos-universal-${{ matrix.configuration }}renderdoc
+        path: xemu-macos-universal-${{ matrix.configuration }}renderdoc.zip
 
   Release:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event.repository.fork == false && github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     needs: [Ubuntu, macOSUniversal, Windows, WindowsPdb]
     steps:
@@ -457,7 +460,7 @@ jobs:
   # package creation.
   PushToPPA:
     name: Push to PPA Snapshot Branch
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event.repository.fork == false && github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     needs: [Ubuntu, macOSUniversal, Windows, WindowsPdb]
     runs-on: ubuntu-latest
     steps:
