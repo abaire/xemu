@@ -62,7 +62,7 @@ static void dump_stats(void)
         }
     }
 
-    fprintf(stderr, "SIOI stats: %d in use\n", in_use);
+    fprintf(stderr, "SIOI stats: %d in use\n\n", in_use);
 }
 #else
 #define SIOI_DUMP_STATS() \
@@ -148,17 +148,18 @@ void sioi_claim(NV2AState *d, const MemoryRegionOps *surface_mem_ops,
 
     qemu_mutex_lock(&surface_mmio_interceptors_lock);
     int i = 0;
+    SurfaceIOInterceptor *interceptor;
     for (; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
-        SurfaceIOInterceptor *interceptor = &surface_mmio_interceptors[i];
+        interceptor = &surface_mmio_interceptors[i];
 
-        if (interceptor->in_use) {
+        if (qatomic_read(&interceptor->in_use)) {
             continue;
         }
 
         char name[64];
         snprintf(name, sizeof(name), "sioi." HWADDR_FMT_plx, base);
 
-        interceptor->in_use = true;
+        qatomic_set(&interceptor->in_use, true);
         interceptor->nv2a_state = d;
         interceptor->base = base;
         interceptor->opaque = opaque;
@@ -170,25 +171,27 @@ void sioi_claim(NV2AState *d, const MemoryRegionOps *surface_mem_ops,
                               &interceptor->surface_mem_ops, interceptor, name,
                               size);
 
-        // Schedule the subregion to be added within a safe BQL context. The
-        // calling thread needs to be blocked until registration completes
-
-        // Using aio_bh with an event guard causes deadlock during reset.
-        // Not using an event guard can cause a race condition where a read/
-        // write is processed before registration completes.
-//        qemu_event_reset(&registration_action_completed);
-//        aio_bh_schedule_oneshot(qemu_get_aio_context(),
-//                                register_interceptor_subregion, interceptor);
-//        qemu_event_wait(&registration_action_completed);
-        bql_lock();
-        register_interceptor_subregion(interceptor);
-        bql_unlock();
         break;
     }
     qemu_mutex_unlock(&surface_mmio_interceptors_lock);
 
     assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
            "Failed to find a free SurfaceIOInterceptor!");
+
+    // Schedule the subregion to be added within a safe BQL context. The
+    // calling thread needs to be blocked until registration completes
+
+    // Using aio_bh with an event guard causes deadlock during reset.
+    // Not using an event guard can cause a race condition where a read/
+    // write is processed before registration completes.
+    //        qemu_event_reset(&registration_action_completed);
+    //        aio_bh_schedule_oneshot(qemu_get_aio_context(),
+    //                                register_interceptor_subregion,
+    //                                interceptor);
+    //        qemu_event_wait(&registration_action_completed);
+    bql_lock();
+    register_interceptor_subregion(interceptor);
+    bql_unlock();
 }
 
 static void delete_interceptor_subregion(void *opaque)
@@ -196,17 +199,16 @@ static void delete_interceptor_subregion(void *opaque)
     SurfaceIOInterceptor *interceptor = opaque;
 
     qemu_mutex_lock(&interceptor->lock);
-    qemu_mutex_lock(&surface_mmio_interceptors_lock);
 
-    interceptor->in_use = false;
     interceptor->delegate_surface_mem_ops = NULL;
 
     memory_region_del_subregion(interceptor->nv2a_state->vram,
                                 &interceptor->mem);
     object_unparent(OBJECT(&interceptor->mem));
 
-    qemu_mutex_unlock(&surface_mmio_interceptors_lock);
     qemu_mutex_unlock(&interceptor->lock);
+
+    qatomic_set(&interceptor->in_use, false);
 }
 
 void sioi_release(void *opaque, hwaddr base)
@@ -217,19 +219,18 @@ void sioi_release(void *opaque, hwaddr base)
     }
 
     fprintf(stderr, "sioi_release 0x%p :: " HWADDR_FMT_plx "\n", opaque, base);
+    SIOI_DUMP_STATS();
 
     qemu_mutex_lock(&surface_mmio_interceptors_lock);
     int i = 0;
+    SurfaceIOInterceptor *interceptor = NULL;
     for (; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
-        SurfaceIOInterceptor *interceptor = &surface_mmio_interceptors[i];
+        interceptor = &surface_mmio_interceptors[i];
 
-        if (!interceptor->in_use || interceptor->opaque != opaque ||
-            interceptor->base != base) {
+        if (!qatomic_read(&interceptor->in_use) ||
+            interceptor->opaque != opaque || interceptor->base != base) {
             continue;
         }
-
-        aio_bh_schedule_oneshot(qemu_get_aio_context(),
-                                delete_interceptor_subregion, interceptor);
         break;
     }
 
@@ -237,4 +238,7 @@ void sioi_release(void *opaque, hwaddr base)
 
     assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
            "Failed to release SurfaceIOInterceptor!");
+
+    aio_bh_schedule_oneshot(qemu_get_aio_context(),
+                            delete_interceptor_subregion, interceptor);
 }
