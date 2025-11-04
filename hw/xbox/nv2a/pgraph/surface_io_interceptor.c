@@ -200,7 +200,8 @@ void sioi_release(void *opaque, hwaddr base)
     qemu_thread_get_self(&owner);
     pthread_getname_np(owner.thread, thread_name_buf, sizeof(thread_name_buf));
 
-    fprintf(stderr, "sioi_release %p :: region " HWADDR_FMT_plx " thread '%s'\n",
+    fprintf(stderr,
+            "sioi_release %p :: region " HWADDR_FMT_plx " thread '%s'\n",
             opaque, base, thread_name_buf);
     SIOI_DUMP_STATS();
 
@@ -221,15 +222,8 @@ void sioi_release(void *opaque, hwaddr base)
 
     qemu_mutex_unlock(&surface_mmio_interceptors_lock);
 
-    // TODO: Decide if multiple releases should be supported.
-    // If pgraph_gl_unbind_surface invokes release it may be called many times
-    // before being claimed again.
-    // If pgraph_gl_unbind_surface does not invoke release, stale surfaces may
-    // retain MMIO mapping leading to deadlocking due to access from unexpected
-    // threads.
-
-//    assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
-//           "Failed to release SurfaceIOInterceptor!");
+    assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
+           "Failed to release SurfaceIOInterceptor!");
 }
 
 static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
@@ -321,6 +315,8 @@ static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data,
 
 static void delete_interceptor_subregion(void *opaque)
 {
+    SurfaceIOInterceptor *interceptor = opaque;
+
     {
         struct QemuThread owner;
         char thread_name_buf[32] = { 0 };
@@ -328,11 +324,11 @@ static void delete_interceptor_subregion(void *opaque)
         pthread_getname_np(owner.thread, thread_name_buf,
                            sizeof(thread_name_buf));
 
-        fprintf(stderr, "delete_interceptor_subregion: thread '%s'\n",
-                thread_name_buf);
+        fprintf(stderr,
+                "delete_interceptor_subregion: region " HWADDR_FMT_plx
+                " thread '%s'\n",
+                interceptor->base, thread_name_buf);
     }
-
-    SurfaceIOInterceptor *interceptor = opaque;
 
     qemu_mutex_lock(&interceptor->lock);
 

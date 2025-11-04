@@ -1311,8 +1311,6 @@ void pgraph_gl_unbind_surface(NV2AState *d, bool color)
             glFramebufferTexture2D(GL_FRAMEBUFFER,
                                    GL_COLOR_ATTACHMENT0,
                                    GL_TEXTURE_2D, 0, 0);
-            fprintf(stderr, "pgraph_gl_unbind_surface color %p region " HWADDR_FMT_plx "\n", r->color_binding, r->color_binding->vram_addr);
-            sioi_release(r->color_binding, r->color_binding->vram_addr);
             r->color_binding = NULL;
         }
     } else {
@@ -1323,8 +1321,6 @@ void pgraph_gl_unbind_surface(NV2AState *d, bool color)
             glFramebufferTexture2D(GL_FRAMEBUFFER,
                                    GL_DEPTH_STENCIL_ATTACHMENT,
                                    GL_TEXTURE_2D, 0, 0);
-            fprintf(stderr, "pgraph_gl_unbind_surface zeta %p region " HWADDR_FMT_plx "\n", r->color_binding, r->color_binding->vram_addr);
-            sioi_release(r->zeta_binding, r->zeta_binding->vram_addr);
             r->zeta_binding = NULL;
         }
     }
