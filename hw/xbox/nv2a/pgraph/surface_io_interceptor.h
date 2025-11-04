@@ -59,4 +59,50 @@ void sioi_claim(NV2AState *state, const MemoryRegionOps *surface_mem_ops,
  */
 void sioi_release(void *opaque, hwaddr base);
 
+
+static inline uint64_t sioi_default_read(void *ram_base, hwaddr offset,
+                                         unsigned size)
+{
+    void *ram_ptr = ram_base + offset;
+    switch (size) {
+    case 1:
+        return ldub_p(ram_ptr);
+
+    case 2:
+        return lduw_le_p(ram_ptr);
+
+    case 4:
+        return ldl_le_p(ram_ptr);
+
+    case 8:
+        return ldq_le_p(ram_ptr);
+
+    default:
+        assert(!"Invalid read size");
+        return 0;
+    }
+}
+
+static inline void sioi_default_write(void *ram_base, hwaddr offset,
+                                      uint64_t data, unsigned size)
+{
+    void *ram_ptr = ram_base + offset;
+    switch (size) {
+    case 1:
+        stb_p(ram_ptr, data);
+        break;
+    case 2:
+        stw_le_p(ram_ptr, data);
+        break;
+    case 4:
+        stl_le_p(ram_ptr, data);
+        break;
+    case 8:
+        stq_le_p(ram_ptr, data);
+        break;
+    default:
+        assert(!"invalid write size");
+    }
+}
+
 #endif // HW_XBOX_NV2A_PGRAPH_SURFACEIO_INTERCEPTOR_H

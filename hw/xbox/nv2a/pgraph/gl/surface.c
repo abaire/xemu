@@ -456,27 +456,8 @@ static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
     }
 
     void *ram_ptr = memory_region_get_ram_ptr(d->vram);
-    ram_ptr += surface->vram_addr + addr;
-
-    switch (size) {
-    case 1:
-        return ldub_p(ram_ptr);
-
-    case 2:
-        return lduw_le_p(ram_ptr);
-
-    case 4:
-        return ldl_le_p(ram_ptr);
-
-    case 8:
-        return ldq_le_p(ram_ptr);
-
-    default:
-        assert(!"Invalid read size");
-        return 0;
-    }
-
-    return 0;
+    ram_ptr += surface->vram_addr;
+    return sioi_default_read(ram_ptr, addr, size);
 }
 
 static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
@@ -497,27 +478,11 @@ static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data, unsigned
         wait_for_surface_downloads(d);
     }
 
-    qatomic_set(&surface->upload_pending, true);
-
     void *ram_ptr = memory_region_get_ram_ptr(d->vram);
-    ram_ptr += surface->vram_addr + addr;
+    ram_ptr += surface->vram_addr;
+    sioi_default_write(ram_ptr, addr, data, size);
 
-    switch (size) {
-    case 1:
-        stb_p(ram_ptr, data);
-        break;
-    case 2:
-        stw_le_p(ram_ptr, data);
-        break;
-    case 4:
-        stl_le_p(ram_ptr, data);
-        break;
-    case 8:
-        stq_le_p(ram_ptr, data);
-        break;
-    default:
-        assert(!"invalid write size");
-    }
+    qatomic_set(&surface->upload_pending, true);
 }
 
 static const MemoryRegionOps surface_mem_ops = {
