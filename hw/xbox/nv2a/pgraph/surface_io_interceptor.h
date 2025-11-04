@@ -39,6 +39,12 @@ typedef struct SurfaceIOInterceptorContext {
 void sioi_init(void);
 
 /**
+ * Schedules releases for any interceptors in use. Should be called when machine
+ * state is reset to avoid bleeding over handlers.
+ */
+void sioi_reset(void);
+
+/**
  * Sets up an interceptor for the given memory region.
  * @param parent MemoryRegion that the interceptor will overlay.
  * @param surface_mem_ops Defines the callbacks that will be invoked on

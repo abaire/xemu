@@ -424,6 +424,7 @@ static bool check_surface_overlaps_range(const SurfaceBinding *surface,
 
 static void wait_for_surface_downloads(NV2AState *d)
 {
+    fprintf(stderr, "wait_for_surface_downloads: unlocking BQL\n");
     bql_unlock();
     PGRAPHGLState *r = d->pgraph.gl_renderer_state;
     qemu_mutex_lock(&d->pfifo.lock);
@@ -433,6 +434,7 @@ static void wait_for_surface_downloads(NV2AState *d)
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&r->downloads_complete);
     bql_lock();
+    fprintf(stderr, "wait_for_surface_downloads: locked BQL\n");
 }
 
 static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
@@ -1309,6 +1311,8 @@ void pgraph_gl_unbind_surface(NV2AState *d, bool color)
             glFramebufferTexture2D(GL_FRAMEBUFFER,
                                    GL_COLOR_ATTACHMENT0,
                                    GL_TEXTURE_2D, 0, 0);
+            fprintf(stderr, "pgraph_gl_unbind_surface color %p region " HWADDR_FMT_plx "\n", r->color_binding, r->color_binding->vram_addr);
+            sioi_release(r->color_binding, r->color_binding->vram_addr);
             r->color_binding = NULL;
         }
     } else {
@@ -1319,6 +1323,8 @@ void pgraph_gl_unbind_surface(NV2AState *d, bool color)
             glFramebufferTexture2D(GL_FRAMEBUFFER,
                                    GL_DEPTH_STENCIL_ATTACHMENT,
                                    GL_TEXTURE_2D, 0, 0);
+            fprintf(stderr, "pgraph_gl_unbind_surface zeta %p region " HWADDR_FMT_plx "\n", r->color_binding, r->color_binding->vram_addr);
+            sioi_release(r->zeta_binding, r->zeta_binding->vram_addr);
             r->zeta_binding = NULL;
         }
     }

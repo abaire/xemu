@@ -132,6 +132,17 @@ static void voice_off(MCPXAPUState *d, uint16_t v)
 
 static void voice_lock(MCPXAPUState *d, uint16_t v, bool lock)
 {
+    {
+        struct QemuThread owner;
+        char thread_name_buf[32] = { 0 };
+        qemu_thread_get_self(&owner);
+        pthread_getname_np(owner.thread, thread_name_buf,
+                           sizeof(thread_name_buf));
+
+        fprintf(stderr, "voice_lock %d %d - thread '%s'\n", v, lock,
+                thread_name_buf);
+    }
+
     assert(v < MCPX_HW_MAX_VOICES);
     qemu_spin_lock(&d->vp.voice_spinlocks[v]);
     uint64_t mask = 1LL << (v % 64);
@@ -1642,6 +1653,12 @@ static void *voice_worker_thread(void *arg)
 
 static void voice_work_acquire_voice_lock_for_processing(MCPXAPUState *d, int v)
 {
+//    struct QemuThread owner;
+//    char thread_name_buf[32] = {0};
+//    qemu_thread_get_self(&owner);
+//    pthread_getname_np(owner.thread, thread_name_buf, sizeof(thread_name_buf));
+//
+//    fprintf(stderr, "voice_work_acquire_voice_lock_for_processing %d - thread '%s'\n", v, thread_name_buf);
     qemu_spin_lock(&d->vp.voice_spinlocks[v]);
     while (is_voice_locked(d, v)) {
         /* Stall until voice is available */
@@ -1666,6 +1683,12 @@ static void voice_work_enqueue(MCPXAPUState *d, int v, int list)
 
 static void voice_work_release_voice_locks(MCPXAPUState *d)
 {
+//    struct QemuThread owner;
+//    char thread_name_buf[32] = {0};
+//    qemu_thread_get_self(&owner);
+//    pthread_getname_np(owner.thread, thread_name_buf, sizeof(thread_name_buf));
+//    fprintf(stderr, "voice_work_release_voice_locks thread '%s'\n", thread_name_buf);
+
     VoiceWorkDispatch *vwd = &d->vp.voice_work_dispatch;
 
     for (int i = 0; i < vwd->queue_len; i++) {

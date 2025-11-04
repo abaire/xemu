@@ -50,7 +50,6 @@ typedef struct SurfaceIOInterceptor {
 // TODO: Determine a reasonable upper bound
 static SurfaceIOInterceptor surface_mmio_interceptors[32] = { 0 };
 static QemuMutex surface_mmio_interceptors_lock;
-static QemuEvent registration_action_completed;
 
 #if defined(XEMU_DEBUG_BUILD)
 #define SIOI_DUMP_STATS() \
@@ -84,71 +83,14 @@ static void dump_stats(void)
     } while (0)
 #endif
 
-static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
-{
-    SurfaceIOInterceptor *interceptor = (SurfaceIOInterceptor *)opaque;
-
-    qemu_mutex_lock(&interceptor->lock);
-
-    uint64_t ret = 0;
-    switch (interceptor->state) {
-    case SIOIS_FREE:
-        assert(!"Hanging sioi read detected");
-
-    case SIOIS_IN_USE: {
-        SurfaceIOInterceptorContext context;
-        context.state = interceptor->nv2a_state;
-        context.opaque = interceptor->opaque;
-        ret = interceptor->delegate_surface_mem_ops->read(&context, addr, size);
-    } break;
-
-    case SIOIS_SHUTTING_DOWN: {
-        void *ram_ptr =
-            memory_region_get_ram_ptr(interceptor->nv2a_state->vram);
-        ram_ptr += interceptor->base;
-        ret = sioi_default_read(ram_ptr, addr, size);
-    } break;
-    }
-
-    qemu_mutex_unlock(&interceptor->lock);
-
-    return ret;
-}
-
+static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size);
 static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data,
-                              unsigned size)
-{
-    SurfaceIOInterceptor *interceptor = (SurfaceIOInterceptor *)opaque;
-
-    qemu_mutex_lock(&interceptor->lock);
-
-    switch (interceptor->state) {
-    case SIOIS_FREE:
-        assert(!"Hanging sioi write detected");
-
-    case SIOIS_IN_USE: {
-        SurfaceIOInterceptorContext context;
-        context.state = interceptor->nv2a_state;
-        context.opaque = interceptor->opaque;
-        interceptor->delegate_surface_mem_ops->write(&context, addr, data,
-                                                     size);
-    } break;
-
-    case SIOIS_SHUTTING_DOWN: {
-        void *ram_ptr =
-            memory_region_get_ram_ptr(interceptor->nv2a_state->vram);
-        ram_ptr += interceptor->base;
-        sioi_default_write(ram_ptr, addr, data, size);
-    } break;
-    }
-
-    qemu_mutex_unlock(&interceptor->lock);
-}
+                              unsigned size);
+static void schedule_interceptor_delete(SurfaceIOInterceptor *interceptor);
 
 void sioi_init(void)
 {
     qemu_mutex_init(&surface_mmio_interceptors_lock);
-    qemu_event_init(&registration_action_completed, false);
 
     for (int i = 0; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
         SurfaceIOInterceptor *interceptor = &surface_mmio_interceptors[i];
@@ -163,6 +105,21 @@ void sioi_init(void)
     }
 }
 
+void sioi_reset(void)
+{
+    qemu_mutex_lock(&surface_mmio_interceptors_lock);
+    for (int i = 0; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
+        SurfaceIOInterceptor *interceptor = &surface_mmio_interceptors[i];
+
+        if (qatomic_read(&interceptor->state) != SIOIS_IN_USE) {
+            continue;
+        }
+
+        schedule_interceptor_delete(interceptor);
+    }
+    qemu_mutex_unlock(&surface_mmio_interceptors_lock);
+}
+
 static void register_interceptor_subregion(void *opaque)
 {
     SurfaceIOInterceptor *interceptor = opaque;
@@ -171,18 +128,23 @@ static void register_interceptor_subregion(void *opaque)
     // See xbox.c
     memory_region_add_subregion_overlap(
         interceptor->nv2a_state->vram, interceptor->base, &interceptor->mem, 1);
-    qemu_event_set(&registration_action_completed);
 }
 
 void sioi_claim(NV2AState *d, const MemoryRegionOps *surface_mem_ops,
                 void *opaque, hwaddr base, uint32_t size)
 {
     if (!tcg_enabled()) {
-        // TODO: Implement or assert.
+        // TODO: Implement or assert?
         return;
     }
 
-    fprintf(stderr, "sioi_claim 0x%p :: " HWADDR_FMT_plx "\n", opaque, base);
+    struct QemuThread owner;
+    char thread_name_buf[32] = { 0 };
+    qemu_thread_get_self(&owner);
+    pthread_getname_np(owner.thread, thread_name_buf, sizeof(thread_name_buf));
+
+    fprintf(stderr, "sioi_claim %p :: region " HWADDR_FMT_plx " thread '%s'\n",
+            opaque, base, thread_name_buf);
     SIOI_DUMP_STATS();
 
     assert(!surface_mem_ops->write_with_attrs &&
@@ -221,24 +183,155 @@ void sioi_claim(NV2AState *d, const MemoryRegionOps *surface_mem_ops,
     assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
            "Failed to find a free SurfaceIOInterceptor!");
 
-    // Schedule the subregion to be added within a safe BQL context. The
-    // calling thread needs to be blocked until registration completes
-
-    // Using aio_bh with an event guard causes deadlock during reset.
-    // Not using an event guard can cause a race condition where a read/
-    // write is processed before registration completes.
-    //        qemu_event_reset(&registration_action_completed);
-    //        aio_bh_schedule_oneshot(qemu_get_aio_context(),
-    //                                register_interceptor_subregion,
-    //                                interceptor);
-    //        qemu_event_wait(&registration_action_completed);
     bql_lock();
     register_interceptor_subregion(interceptor);
     bql_unlock();
 }
 
+void sioi_release(void *opaque, hwaddr base)
+{
+    if (!tcg_enabled()) {
+        // TODO: Implement or assert.
+        return;
+    }
+
+    struct QemuThread owner;
+    char thread_name_buf[32] = { 0 };
+    qemu_thread_get_self(&owner);
+    pthread_getname_np(owner.thread, thread_name_buf, sizeof(thread_name_buf));
+
+    fprintf(stderr, "sioi_release %p :: region " HWADDR_FMT_plx " thread '%s'\n",
+            opaque, base, thread_name_buf);
+    SIOI_DUMP_STATS();
+
+    qemu_mutex_lock(&surface_mmio_interceptors_lock);
+    int i = 0;
+    SurfaceIOInterceptor *interceptor = NULL;
+    for (; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
+        interceptor = &surface_mmio_interceptors[i];
+
+        if (qatomic_read(&interceptor->state) == SIOIS_FREE ||
+            interceptor->opaque != opaque || interceptor->base != base) {
+            continue;
+        }
+
+        schedule_interceptor_delete(interceptor);
+        break;
+    }
+
+    qemu_mutex_unlock(&surface_mmio_interceptors_lock);
+
+    // TODO: Decide if multiple releases should be supported.
+    // If pgraph_gl_unbind_surface invokes release it may be called many times
+    // before being claimed again.
+    // If pgraph_gl_unbind_surface does not invoke release, stale surfaces may
+    // retain MMIO mapping leading to deadlocking due to access from unexpected
+    // threads.
+
+//    assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
+//           "Failed to release SurfaceIOInterceptor!");
+}
+
+static uint64_t surface_mem_read(void *opaque, hwaddr addr, unsigned size)
+{
+    SurfaceIOInterceptor *interceptor = (SurfaceIOInterceptor *)opaque;
+
+    {
+        struct QemuThread owner;
+        char thread_name_buf[32] = { 0 };
+        qemu_thread_get_self(&owner);
+        pthread_getname_np(owner.thread, thread_name_buf,
+                           sizeof(thread_name_buf));
+
+        fprintf(stderr,
+                "sioi :: surface_mem_read: region " HWADDR_FMT_plx
+                " @ " HWADDR_FMT_plx " thread '%s'\n",
+                interceptor->base, interceptor->base + addr, thread_name_buf);
+    }
+
+    qemu_mutex_lock(&interceptor->lock);
+
+    uint64_t ret = 0;
+    switch (interceptor->state) {
+    case SIOIS_FREE:
+        assert(!"Hanging sioi read detected");
+
+    case SIOIS_IN_USE: {
+        SurfaceIOInterceptorContext context;
+        context.state = interceptor->nv2a_state;
+        context.opaque = interceptor->opaque;
+        ret = interceptor->delegate_surface_mem_ops->read(&context, addr, size);
+    } break;
+
+    case SIOIS_SHUTTING_DOWN: {
+        void *ram_ptr =
+            memory_region_get_ram_ptr(interceptor->nv2a_state->vram);
+        ram_ptr += interceptor->base;
+        ret = sioi_default_read(ram_ptr, addr, size);
+    } break;
+    }
+
+    qemu_mutex_unlock(&interceptor->lock);
+
+    return ret;
+}
+
+static void surface_mem_write(void *opaque, hwaddr addr, uint64_t data,
+                              unsigned size)
+{
+    SurfaceIOInterceptor *interceptor = (SurfaceIOInterceptor *)opaque;
+
+    {
+        struct QemuThread owner;
+        char thread_name_buf[32] = { 0 };
+        qemu_thread_get_self(&owner);
+        pthread_getname_np(owner.thread, thread_name_buf,
+                           sizeof(thread_name_buf));
+
+        fprintf(stderr,
+                "sioi :: surface_mem_write: region " HWADDR_FMT_plx
+                " @ " HWADDR_FMT_plx " thread '%s'\n",
+                interceptor->base, interceptor->base + addr, thread_name_buf);
+    }
+
+    qemu_mutex_lock(&interceptor->lock);
+
+    switch (interceptor->state) {
+    case SIOIS_FREE:
+        assert(!"Hanging sioi write detected");
+
+    case SIOIS_IN_USE: {
+        SurfaceIOInterceptorContext context;
+        context.state = interceptor->nv2a_state;
+        context.opaque = interceptor->opaque;
+        interceptor->delegate_surface_mem_ops->write(&context, addr, data,
+                                                     size);
+    } break;
+
+    case SIOIS_SHUTTING_DOWN: {
+        void *ram_ptr =
+            memory_region_get_ram_ptr(interceptor->nv2a_state->vram);
+        ram_ptr += interceptor->base;
+        sioi_default_write(ram_ptr, addr, data, size);
+    } break;
+    }
+
+    qemu_mutex_unlock(&interceptor->lock);
+}
+
 static void delete_interceptor_subregion(void *opaque)
 {
+    {
+        struct QemuThread owner;
+        char thread_name_buf[32] = { 0 };
+        qemu_thread_get_self(&owner);
+        pthread_getname_np(owner.thread, thread_name_buf,
+                           sizeof(thread_name_buf));
+
+        fprintf(stderr, "delete_interceptor_subregion: thread '%s'\n",
+                thread_name_buf);
+    }
+
     SurfaceIOInterceptor *interceptor = opaque;
 
     qemu_mutex_lock(&interceptor->lock);
@@ -254,38 +347,11 @@ static void delete_interceptor_subregion(void *opaque)
     qemu_mutex_unlock(&interceptor->lock);
 }
 
-void sioi_release(void *opaque, hwaddr base)
+static void schedule_interceptor_delete(SurfaceIOInterceptor *interceptor)
 {
-    if (!tcg_enabled()) {
-        // TODO: Implement or assert.
-        return;
-    }
-
-    fprintf(stderr, "sioi_release 0x%p :: " HWADDR_FMT_plx "\n", opaque, base);
-    SIOI_DUMP_STATS();
-
-    qemu_mutex_lock(&surface_mmio_interceptors_lock);
-    int i = 0;
-    SurfaceIOInterceptor *interceptor = NULL;
-    for (; i < ARRAY_SIZE(surface_mmio_interceptors); ++i) {
-        interceptor = &surface_mmio_interceptors[i];
-
-        if (qatomic_read(&interceptor->state) == SIOIS_FREE ||
-            interceptor->opaque != opaque || interceptor->base != base) {
-            continue;
-        }
-
-        qemu_mutex_lock(&interceptor->lock);
-        qatomic_set(&interceptor->state, SIOIS_SHUTTING_DOWN);
-        qemu_mutex_unlock(&interceptor->lock);
-        break;
-    }
-
-    qemu_mutex_unlock(&surface_mmio_interceptors_lock);
-
-    assert(i < ARRAY_SIZE(surface_mmio_interceptors) &&
-           "Failed to release SurfaceIOInterceptor!");
-
+    qemu_mutex_lock(&interceptor->lock);
+    qatomic_set(&interceptor->state, SIOIS_SHUTTING_DOWN);
+    qemu_mutex_unlock(&interceptor->lock);
     aio_bh_schedule_oneshot(qemu_get_aio_context(),
                             delete_interceptor_subregion, interceptor);
 }

@@ -260,6 +260,7 @@ static void nv2a_unlock_fifo(NV2AState *d)
 
 static void nv2a_reset(NV2AState *d)
 {
+    fprintf(stderr, "== nv2a_reset ========================\n\n");
     nv2a_lock_fifo(d);
     bool halted = qatomic_read(&d->pfifo.halt);
     if (!halted) {
