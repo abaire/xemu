@@ -94,6 +94,17 @@ void ProcessKeyboardShortcuts(void)
         }
     }
 
+    if (ImGui::IsKeyPressed(ImGuiKey_F8)) {
+        static bool dma_trace_state = false;
+
+        dma_trace_state = !dma_trace_state;
+        trace_enable_events(dma_trace_state ? "ide_dma_cb" :
+                                              "-ide_dma_cb");
+        trace_enable_events(dma_trace_state ? "ide_atapi_cmd_read_dma_cb_aio" :
+                                              "-ide_atapi_cmd_read_dma_cb_aio");
+    }
+
+
 #ifdef CONFIG_RENDERDOC
     if (ImGui::IsKeyPressed(ImGuiKey_F10) && nv2a_dbg_renderdoc_available()) {
         ImGuiIO& io = ImGui::GetIO();

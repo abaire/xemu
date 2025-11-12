@@ -39,6 +39,64 @@
 
 NV2AState *g_nv2a;
 
+// DONOTSUBMIT
+//static hwaddr cpu_time_addr_cb = 0;
+//static MemAccessCallback *cpu_time_addr_mac = NULL;
+//static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
+//                                    hwaddr len, bool write)
+//{
+//    char thread_name[64] = {0};
+//    pthread_t current_thread = pthread_self();
+//    const char *name = NULL;
+//    if (!pthread_getname_np(current_thread, thread_name, sizeof(thread_name))) {
+//        name = thread_name;
+//    }
+//
+////    fprintf(stderr,
+////            "Interesting access at 0x" HWADDR_FMT_plx " %s from thread '%s'\n",
+////            addr, write ? "!WRITE!" : "[READ]", name);
+//
+////    if (!write) {
+////        void *value = memory_region_get_ram_ptr(mr) + addr;
+////        uint32_t actual = *(uint32_t *)(value);
+////        fprintf(stderr, "  Read value 0x%08X\n", actual);
+////    }
+//}
+
+//static hwaddr phs_for_virt(CPUState *cpu, hwaddr virt) {
+//    const hwaddr page_mask = TARGET_PAGE_SIZE - 1;
+//    hwaddr phys_page = cpu_get_phys_page_debug(cpu, virt);
+//    hwaddr phys_addr = phys_page + (virt & page_mask);
+//    return phys_addr;
+//}
+//
+//static void update_callbacks(NV2AState *d) {
+//    //        static hwaddr semaphore_store_gva = 0x817df000;
+//    static hwaddr cdevice_gva = 0x21c490;
+//    CPUState *cpu = qemu_get_cpu(0);
+//
+//    const hwaddr target_addr = cdevice_gva + 0x2C;
+//    //        hwaddr cpu_time_addr = cpu_get_phys_page_debug(cpu, semaphore_store_gva);
+//    hwaddr cpu_time_addr = phs_for_virt(cpu, target_addr);
+//    if (cpu_time_addr != cpu_time_addr_cb && cpu_time_addr) {
+//        cpu_time_addr_cb = cpu_time_addr;
+//        fprintf(stderr,
+//                "Register cpu_time access callback at phys " HWADDR_FMT_plx
+//                "\n",
+//                cpu_time_addr);
+//
+//        if (cpu_time_addr_mac) {
+//            mem_access_callback_remove_by_ref(cpu, cpu_time_addr_mac);
+//            cpu_time_addr_mac = NULL;
+//        }
+//
+//        cpu_time_addr_mac = mem_access_callback_insert(
+//            cpu, d->vram, cpu_time_addr_cb, 4,
+//            &surface_access_callback, (void*)cpu_time_addr_cb);
+//    }
+//}
+
+
 uint64_t pgraph_read(void *opaque, hwaddr addr, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
@@ -92,6 +150,7 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     switch (addr) {
     case NV_PGRAPH_INTR:
+fprintf(stderr, "pgraph_write NV_PGRAPH_INTR clear 0x%X => 0x%X\n", val, pg->pending_interrupts & ~val);
         pg->pending_interrupts &= ~val;
 
         if (!(pg->pending_interrupts & NV_PGRAPH_INTR_ERROR)) {
@@ -103,10 +162,14 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         pfifo_kick(d);
         break;
     case NV_PGRAPH_INTR_EN:
+fprintf(stderr, "NV_PGRAPH_INTR_EN enable interrupts 0x%X\n", val);
         pg->enabled_interrupts = val;
         break;
     case NV_PGRAPH_INCREMENT:
         if (val & NV_PGRAPH_INCREMENT_READ_3D) {
+            uint32_t cur = PG_GET_MASK(NV_PGRAPH_SURFACE, NV_PGRAPH_SURFACE_READ_3D );
+            fprintf(stderr, "NV_PGRAPH_INCREMENT read idx %d => %d (mod)\n", cur, cur + 1);
+
             PG_SET_MASK(NV_PGRAPH_SURFACE,
                      NV_PGRAPH_SURFACE_READ_3D,
                      (PG_GET_MASK(NV_PGRAPH_SURFACE,
@@ -115,6 +178,8 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
                                    NV_PGRAPH_SURFACE_MODULO_3D) );
             nv2a_profile_increment();
             pfifo_kick(d);
+        } else {
+            fprintf(stderr, "?? NV_PGRAPH_INCREMENT 0x%X\n", val);
         }
         break;
     case NV_PGRAPH_RDI_DATA: {
@@ -169,6 +234,11 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     // events
     switch (addr) {
     case NV_PGRAPH_FIFO:
+if(val) {
+    fprintf(stderr,
+            "pgraph_write: NV_PGRAPH_FIFO: End of graphics interrupt? 0x%X\n",
+            val);
+}
         pfifo_kick(d);
         break;
     }
@@ -849,11 +919,23 @@ DEF_METHOD(NV097, NO_OPERATION)
     pg->pending_interrupts |= NV_PGRAPH_INTR_ERROR;
     pg->waiting_for_nop = true;
 
+    uint32_t clear_zstencil =
+        pgraph_reg_r(pg, NV_PGRAPH_ZSTENCILCLEARVALUE);
+    uint32_t clear_color =
+        pgraph_reg_r(pg, NV_PGRAPH_COLORCLEARVALUE);
+
+    fprintf(stderr,
+            "NO_OPERATION: Waiting for nop, param is 0x%X  clear_z: 0x%X "
+            "clear_c: 0x%X\n",
+            parameter, clear_zstencil, clear_color);
+
     qemu_mutex_unlock(&pg->lock);
     bql_lock();
     nv2a_update_irq(d);
     bql_unlock();
     qemu_mutex_lock(&pg->lock);
+
+    fprintf(stderr, "  NO_OPERATION: Unlocked after nv2a_update_irq\n");
 }
 
 DEF_METHOD(NV097, WAIT_FOR_IDLE)
@@ -863,18 +945,24 @@ DEF_METHOD(NV097, WAIT_FOR_IDLE)
 
 DEF_METHOD(NV097, SET_FLIP_READ)
 {
+    fprintf(stderr, "SET_FLIP_READ 0x%X\n", parameter);
+
     PG_SET_MASK(NV_PGRAPH_SURFACE, NV_PGRAPH_SURFACE_READ_3D,
              parameter);
 }
 
 DEF_METHOD(NV097, SET_FLIP_WRITE)
 {
+    fprintf(stderr, "SET_FLIP_WRITE 0x%X\n", parameter);
+
     PG_SET_MASK(NV_PGRAPH_SURFACE, NV_PGRAPH_SURFACE_WRITE_3D,
              parameter);
 }
 
 DEF_METHOD(NV097, SET_FLIP_MODULO)
 {
+    fprintf(stderr, "SET_FLIP_MODULO 0x%X\n", parameter);
+
     PG_SET_MASK(NV_PGRAPH_SURFACE, NV_PGRAPH_SURFACE_MODULO_3D,
              parameter);
 }
@@ -894,12 +982,17 @@ DEF_METHOD(NV097, FLIP_INCREMENT_WRITE)
     uint32_t new =
         PG_GET_MASK(NV_PGRAPH_SURFACE, NV_PGRAPH_SURFACE_WRITE_3D);
 
+    fprintf(stderr, "FLIP_INCREMENT_WRITE 0x%X => 0x%X\n", old, new);
+
     trace_nv2a_pgraph_flip_increment_write(old, new);
     pg->frame_time++;
 }
 
 DEF_METHOD(NV097, FLIP_STALL)
 {
+    fprintf(stderr, "FLIP_STALL\n");
+
+//    update_callbacks(d);
     trace_nv2a_pgraph_flip_stall();
     d->pgraph.renderer->ops.surface_update(d, false, true, true);
     d->pgraph.renderer->ops.flip_stall(d);
@@ -2901,6 +2994,9 @@ DEF_METHOD(NV097, BACK_END_WRITE_SEMAPHORE_RELEASE)
                                                    &semaphore_dma_len);
     assert(semaphore_offset < semaphore_dma_len);
     semaphore_data += semaphore_offset;
+
+    fprintf(stderr, "BACK_END_WRITE_SEMAPHORE_RELEASE 0x%08lX => 0x%08X\n",
+            semaphore_data - d->vram_ptr, parameter);
 
     stl_le_p((uint32_t*)semaphore_data, parameter);
 

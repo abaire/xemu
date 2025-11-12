@@ -684,6 +684,10 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     swizzle &= surface->swizzle;
     downscale &= (pg->surface_scale_factor != 1);
 
+    fprintf(stderr,
+            "surface_download_to_buffer " HWADDR_FMT_plx " - " HWADDR_FMT_plx "\n",
+            surface->vram_addr, surface->vram_addr + surface->size);
+
     trace_nv2a_pgraph_surface_download(
         surface->color ? "COLOR" : "ZETA",
         surface->swizzle ? "sz" : "lin", surface->vram_addr,

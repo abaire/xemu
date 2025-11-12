@@ -57,11 +57,13 @@ void pvideo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     switch (addr) {
     case NV_PVIDEO_BUFFER:
+        fprintf(stderr, "PVIDEO enable 0x%llX\n", val);
         d->pvideo.regs[addr] = val;
         // d->vga.enable_overlay = true;
         pvideo_vga_invalidate(d);
         break;
     case NV_PVIDEO_STOP:
+        fprintf(stderr, "PVIDEO STOP 0x%llX\n", val);
         // PVIDEO_STOP may be set many times during the course of video playback
         // but the overlay is only torn down if the 0th bit is 1.
         if (val & 0x01) {

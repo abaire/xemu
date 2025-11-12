@@ -65,6 +65,11 @@ static int smbus_cx25871_write_data(SMBusDevice *dev, uint8_t *buf, uint8_t len)
     DPRINTF("smbus_cx25871_write_data: addr=0x%02x cmd=0x%02x val=0x%02x\n",
             dev->i2c.address, cmd, buf[0]);
 
+    fprintf(stderr, "smbus_cx25871_write_data: addr=0x%02x cmd=0x%02x val=0x%02x\n",
+            dev->i2c.address, cmd, buf[0]);
+
+    // According to the datasheet, writes to registers <= 6 should be ignored
+    // as those registers are read-only.
     memcpy(cx->registers + cmd, buf, MIN(len, 256 - cmd));
 
     return 0;
@@ -75,6 +80,11 @@ static uint8_t smbus_cx25871_receive_byte(SMBusDevice *dev)
     SMBusCX25871Device *cx = SMBUS_CX25871(dev);
     DPRINTF("smbus_cx25871_receive_byte: addr=0x%02x cmd=0x%02x\n",
             dev->i2c.address, cx->cmd);
+    if (cx->cmd == 6) {
+        fprintf(stderr, "Connexant read field count 0x%X\n", cx->registers[cx->cmd]);
+    }
+//    fprintf(stderr, "smbus_cx25871_receive_byte: addr=0x%02x cmd=0x%02x  value is 0x%X\n",
+//            dev->i2c.address, cx->cmd, (uint32_t)cx->registers[cx->cmd]);
     return cx->registers[cx->cmd++];
 }
 

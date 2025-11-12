@@ -80,6 +80,8 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         nv2a_update_irq(d);
         break;
     default:
+//        fprintf(stderr, "pfifo_write: " HWADDR_FMT_plx " => 0x%llX\n", addr,
+//                val);
         d->pfifo.regs[addr] = val;
         break;
     }
@@ -109,7 +111,7 @@ static bool is_flip_stall_complete(NV2AState *d)
 
     uint32_t s = pgraph_reg_r(pg, NV_PGRAPH_SURFACE);
 
-    NV2A_DPRINTF("flip stall read: %d, write: %d, modulo: %d\n",
+    fprintf(stderr, "flip stall read: %d, write: %d, modulo: %d\n",
         GET_MASK(s, NV_PGRAPH_SURFACE_READ_3D),
         GET_MASK(s, NV_PGRAPH_SURFACE_WRITE_3D),
         GET_MASK(s, NV_PGRAPH_SURFACE_MODULO_3D));
@@ -141,9 +143,14 @@ static bool pfifo_stall_for_flip(NV2AState *d)
 
 static bool pfifo_puller_should_stall(NV2AState *d)
 {
-    return pfifo_stall_for_flip(d) || qatomic_read(&d->pgraph.waiting_for_nop) ||
-           qatomic_read(&d->pgraph.waiting_for_context_switch) ||
-           !can_fifo_access(d);
+    bool stall_for_flip = pfifo_stall_for_flip(d);
+    bool waiting_for_nop = qatomic_read(&d->pgraph.waiting_for_nop);
+    bool waiting_for_ctx_switch = qatomic_read(&d->pgraph.waiting_for_context_switch);
+    bool cannot_access = !can_fifo_access(d);
+
+    return stall_for_flip || waiting_for_nop ||
+           waiting_for_ctx_switch ||
+           cannot_access;
 }
 
 static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
