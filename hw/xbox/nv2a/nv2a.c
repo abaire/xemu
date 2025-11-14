@@ -22,6 +22,14 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "qemu/main-loop.h"
 
+static hwaddr phs_for_virt(CPUState *cpu, hwaddr virt) {
+    const hwaddr page_mask = TARGET_PAGE_SIZE - 1;
+    hwaddr phys_page = cpu_get_phys_page_debug(cpu, virt);
+    hwaddr phys_addr = phys_page + (virt & page_mask);
+    return phys_addr;
+}
+
+
 void nv2a_update_irq(NV2AState *d)
 {
     /* PFIFO */
@@ -33,17 +41,66 @@ void nv2a_update_irq(NV2AState *d)
 
     /* PCRTC */
     if (d->pcrtc.pending_interrupts & d->pcrtc.enabled_interrupts) {
+        if (!(d->pmc.pending_interrupts & NV_PMC_INTR_0_PCRTC)) {
+            fprintf(stderr, "nv2a_update_irq: VBLANK\n");
+        }
+
         d->pmc.pending_interrupts |= NV_PMC_INTR_0_PCRTC;
     } else {
+
+        if (d->pmc.pending_interrupts & NV_PMC_INTR_0_PCRTC) {
+/*
+            static hwaddr vblankflip_count_gva = 0x21e0b8 + 0x1C0;
+            static hwaddr vblank_target_count_gbas[] = {
+                0x21e0b8 + 0x178,
+                0x21e0c4 + 0x178
+            };
+
+            CPUState *cpu = qemu_get_cpu(0);
+            const hwaddr flipcount_addr = phs_for_virt(cpu, vblankflip_count_gva);
+
+            const hwaddr target_addr_0 = phs_for_virt(cpu, vblank_target_count_gbas[0]);
+            const hwaddr target_addr_1 = phs_for_virt(cpu, vblank_target_count_gbas[1]);
+
+            void *base_memory = memory_region_get_ram_ptr(d->vram);
+            uint32_t count = *(uint32_t*)(base_memory + flipcount_addr);
+            uint32_t target0 = *(uint32_t*)(base_memory + target_addr_0);
+            uint32_t target1 = *(uint32_t*)(base_memory + target_addr_1);
+
+            fprintf(stderr,
+                    "nv2a_update_irq: CLEAR VBLANK. Flip info 0x%X tgt 0x%X or "
+                    "0x%X\n\n",
+                    count, target0, target1);
+*/
+          fprintf(stderr, "nv2a_update_irq: CLEAR VBLANK\n");
+        }
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PCRTC;
     }
 
     /* PGRAPH */
     if (d->pgraph.pending_interrupts & d->pgraph.enabled_interrupts) {
+
+        if (!(d->pmc.pending_interrupts & NV_PMC_INTR_0_PGRAPH)) {
+            fprintf(stderr,
+                    "nv2a_update_irq: Setting pmc NV_PMC_INTR_0_PGRAPH  "
+                    "pgraph: 0x%X 0x%X\n",
+                    d->pgraph.pending_interrupts, d->pgraph.enabled_interrupts);
+        }
+
         d->pmc.pending_interrupts |= NV_PMC_INTR_0_PGRAPH;
     } else {
+
+        if ((d->pmc.pending_interrupts & NV_PMC_INTR_0_PGRAPH)) {
+            fprintf(stderr,
+                    "nv2a_update_irq: Clearing pmc NV_PMC_INTR_0_PGRAPH\n");
+        }
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PGRAPH;
     }
+
+    //fprintf(stderr, "nv2a_update_irq: pmc pending interrupts 0x%X  enabled_interrupts: 0x%X  pgraph: pend 0x%X  enabled 0x%X\n",
+//            d->pmc.pending_interrupts, d->pmc.enabled_interrupts ,
+//            d->pgraph.pending_interrupts ,
+//                d->pgraph.enabled_interrupts);
 
     if (d->pmc.pending_interrupts && d->pmc.enabled_interrupts) {
         trace_nv2a_irq(d->pmc.pending_interrupts);
@@ -172,12 +229,39 @@ int nv2a_get_screen_off(void)
     return g_nv2a->vga.sr[VGA_SEQ_CLOCK_MODE] & VGA_SR01_SCREEN_OFF;
 }
 
+#include "hw/i2c/smbus_slave.h"
+typedef struct SMBusCX25871Device {
+    SMBusDevice smbusdev;
+    uint8_t registers[256];
+    uint8_t cmd;
+} SMBusCX25871Device;
+
+static void update_conexant_field_counter(void)
+{
+// Also update the TV encoder state with the current frame count
+#define TYPE_SMBUS_CX25871 "smbus-cx25871"
+#define SMBUS_CX25871(obj) \
+    OBJECT_CHECK(SMBusCX25871Device, (obj), TYPE_SMBUS_CX25871)
+
+    Object *obj = object_resolve_path_type("", TYPE_SMBUS_CX25871, NULL);
+    if (obj) {
+        SMBusCX25871Device *cx = SMBUS_CX25871(obj);
+        cx->registers[0x06] =
+            (cx->registers[0x06] & 0xF0) | ((cx->registers[0x06] + 1) & 0x03);
+    }
+}
+
 static void nv2a_vga_gfx_update(void *opaque)
 {
     VGACommonState *vga = opaque;
     vga->hw_ops->gfx_update(vga);
 
     NV2AState *d = container_of(vga, NV2AState, vga);
+
+    if (!(d->pcrtc.pending_interrupts & NV_PCRTC_INTR_0_VBLANK)) {
+        update_conexant_field_counter();
+    }
+
     d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
     d->pcrtc.raster = 0;
 

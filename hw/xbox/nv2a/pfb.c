@@ -31,7 +31,11 @@ uint64_t pfb_read(void *opaque, hwaddr addr, unsigned int size)
         r = memory_region_size(d->vram);
         break;
     case NV_PFB_WBC:
-        r = 0; /* Flush not pending. */
+        /* Flush not pending. */
+//        d->pfb.regs[addr] &= ~NV_PFB_WBC_FLUSH;
+//        r = d->pfb.regs[addr];
+//        fprintf(stderr, "PFB WBC read flushed: 0x%X\n", d->pfb.regs[addr]);
+        r = 0;
         break;
     default:
         r = d->pfb.regs[addr];
@@ -49,6 +53,10 @@ void pfb_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     nv2a_reg_log_write(NV_PFB, addr, size, val);
 
     switch (addr) {
+//    case NV_PFB_WBC:
+//        fprintf(stderr, "PFB write WBC write 0x%llX\n", val);
+//        // fallthrough //
+
     default:
         d->pfb.regs[addr] = val;
         break;

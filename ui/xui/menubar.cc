@@ -29,6 +29,10 @@
 #include "update.hh"
 #include "../xemu-os-utils.h"
 
+extern "C" {
+#include "trace/control.h"
+}
+
 extern float g_main_menu_height; // FIXME
 
 #ifdef CONFIG_RENDERDOC
@@ -70,6 +74,36 @@ void ProcessKeyboardShortcuts(void)
     if (ImGui::IsKeyPressed(ImGuiKey_F12)) {
         ActionScreenshot();
     }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F9)) {
+        // TODO: Look up current state of nv2a traces and init this var.
+        static bool pgraph_trace_state = false;
+        pgraph_trace_state = !pgraph_trace_state;
+        static const char *nv2a_pgraph_enable = "nv2a_pgraph_*";
+        static const char *nv2a_pgraph_disable = "-nv2a_pgraph_*";
+        trace_enable_events(pgraph_trace_state ? nv2a_pgraph_enable :
+                                                 nv2a_pgraph_disable);
+
+        static const char *nv2a_reg_enable = "nv2a_reg_write*";
+        static const char *nv2a_reg_disable = "-nv2a_reg_write*";
+        ImGuiIO& io = ImGui::GetIO();
+        if (pgraph_trace_state && io.KeyShift) {
+            trace_enable_events(nv2a_reg_enable);
+        } else {
+            trace_enable_events(nv2a_reg_disable);
+        }
+    }
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F8)) {
+        static bool dma_trace_state = false;
+
+        dma_trace_state = !dma_trace_state;
+        trace_enable_events(dma_trace_state ? "ide_dma_cb" :
+                                              "-ide_dma_cb");
+        trace_enable_events(dma_trace_state ? "ide_atapi_cmd_read_dma_cb_aio" :
+                                              "-ide_atapi_cmd_read_dma_cb_aio");
+    }
+
 
 #ifdef CONFIG_RENDERDOC
     if (ImGui::IsKeyPressed(ImGuiKey_F10) && nv2a_dbg_renderdoc_available()) {

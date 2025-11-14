@@ -63,6 +63,13 @@ void pmc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         nv2a_update_irq(d);
         break;
     case NV_PMC_INTR_EN_0:
+if (val > 1) {
+    fprintf(
+        stderr,
+        "[PMC] NV_PMC_INTR_EN_0 d->pmc.enabled_interrupts = 0x%llX\n",
+        val);
+}
+
         d->pmc.enabled_interrupts = val;
         nv2a_update_irq(d);
         break;
@@ -70,4 +77,3 @@ void pmc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
 }
-

@@ -21,6 +21,7 @@
 
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "ui/xemu-settings.h"
+#include "hw/xbox/nv2a/debug_gl.h"
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "debug.h"
@@ -233,8 +234,8 @@ static void render_surface_to(NV2AState *d, SurfaceBinding *surface,
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, gl_target,
                            gl_texture, 0);
     glDrawBuffers(1, draw_buffers);
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_FRAMEBUFFER_COMPLETE();
+    ASSERT_NO_GL_ERROR();
 
     float color[] = { 0.0f, 0.0f, 0.0f, 0.0f };
     glBindTexture(GL_TEXTURE_2D, surface->gl_buffer);
@@ -644,8 +645,7 @@ static void bind_current_surface(NV2AState *d)
     }
 
     if (r->color_binding || r->zeta_binding) {
-        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-               GL_FRAMEBUFFER_COMPLETE);
+        ASSERT_FRAMEBUFFER_COMPLETE();
     }
 }
 
@@ -684,6 +684,10 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     swizzle &= surface->swizzle;
     downscale &= (pg->surface_scale_factor != 1);
 
+    fprintf(stderr,
+            "surface_download_to_buffer " HWADDR_FMT_plx " - " HWADDR_FMT_plx "\n",
+            surface->vram_addr, surface->vram_addr + surface->size);
+
     trace_nv2a_pgraph_surface_download(
         surface->color ? "COLOR" : "ZETA",
         surface->swizzle ? "sz" : "lin", surface->vram_addr,
@@ -700,7 +704,7 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     glFramebufferTexture2D(GL_FRAMEBUFFER, surface->fmt.gl_attachment,
                            GL_TEXTURE_2D, surface->gl_buffer, 0);
 
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    ASSERT_FRAMEBUFFER_COMPLETE();
 
     /* Read surface into memory */
     uint8_t *gl_read_buf = pixels;
@@ -1254,8 +1258,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 
         glFramebufferTexture2D(GL_FRAMEBUFFER, entry.fmt.gl_attachment,
                                GL_TEXTURE_2D, found->gl_buffer, 0);
-        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-               GL_FRAMEBUFFER_COMPLETE);
+        ASSERT_FRAMEBUFFER_COMPLETE();
 
         surface->buffer_dirty = false;
     }
