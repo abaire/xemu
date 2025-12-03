@@ -106,6 +106,8 @@ typedef struct NV2AState {
     } pfifo;
 
     struct {
+        uint32_t pending_interrupts;
+        uint32_t enabled_interrupts;
         uint32_t regs[0x1000];
     } pvideo;
 
