@@ -45,6 +45,13 @@ void nv2a_update_irq(NV2AState *d)
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PGRAPH;
     }
 
+    /* PVIDEO */
+    if (d->pvideo.pending_interrupts & d->pvideo.enabled_interrupts) {
+        d->pmc.pending_interrupts |= NV_PMC_INTR_0_PVIDEO_PENDING;
+    } else {
+        d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PVIDEO_PENDING;
+    }
+
     if (d->pmc.pending_interrupts && d->pmc.enabled_interrupts) {
         trace_nv2a_irq(d->pmc.pending_interrupts);
         pci_irq_assert(PCI_DEVICE(d));

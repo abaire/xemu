@@ -40,6 +40,12 @@ uint64_t pvideo_read(void *opaque, hwaddr addr, unsigned int size)
     case NV_PVIDEO_STOP:
         r = 0;
         break;
+    case NV_PVIDEO_INTR:
+        r = d->pvideo.pending_interrupts;
+        break;
+    case NV_PVIDEO_INTR_EN:
+        r = d->pvideo.enabled_interrupts;
+        break;
     default:
         r = d->pvideo.regs[addr];
         break;
@@ -69,6 +75,14 @@ void pvideo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         }
         // d->vga.enable_overlay = false;
         pvideo_vga_invalidate(d);
+        break;
+    case NV_PVIDEO_INTR:
+        d->pvideo.pending_interrupts &= ~val;
+        nv2a_update_irq(d);
+        break;
+    case NV_PVIDEO_INTR_EN:
+        d->pvideo.enabled_interrupts = val;
+        nv2a_update_irq(d);
         break;
     default:
         d->pvideo.regs[addr] = val;
