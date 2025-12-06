@@ -179,4 +179,9 @@ void hmp_info_mtree(Monitor *mon, const QDict *qdict);
 void hmp_info_cryptodev(Monitor *mon, const QDict *qdict);
 void hmp_dumpdtb(Monitor *mon, const QDict *qdict);
 
+// <abaire>
+bool qemu_plugin_dispatch_cmd(const char *name, const char *args);
+void hmp_plugin_cmd(Monitor *mon, const QDict *qdict);
+// </abaire>
+
 #endif
