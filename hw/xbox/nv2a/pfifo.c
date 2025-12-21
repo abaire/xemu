@@ -79,12 +79,14 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         d->pfifo.enabled_interrupts = val;
         nv2a_update_irq(d);
         break;
+    case NV_PFIFO_CACHE1_DMA_PUT:
+    case NV_PFIFO_CACHE1_DMA_GET:
+        pfifo_kick(d);
+        /* fallthrough */
     default:
         d->pfifo.regs[addr] = val;
         break;
     }
-
-    pfifo_kick(d);
 
     qemu_mutex_unlock(&d->pfifo.lock);
 }
@@ -235,11 +237,72 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         assert(false);
     }
 
-    if (num_proc > 0) {
-        *status |= NV_PFIFO_CACHE1_STATUS_LOW_MARK;
+    return num_proc;
+}
+
+static inline size_t linearize_cache1(const NV2AState *d, uint32_t *methods,
+                                      uint32_t *method_counts,
+                                      uint32_t *parameters)
+{
+    uint32_t get_index = d->pfifo.regs[NV_PFIFO_CACHE1_GET] / 4;
+    const uint32_t put_index = d->pfifo.regs[NV_PFIFO_CACHE1_PUT] / 4;
+
+    size_t count = 0;
+    do {
+        uint32_t method_data =
+            d->pfifo.regs[NV_PFIFO_CACHE1_METHOD + (get_index * 8)];
+        *methods++ = method_data & 0xFFFF;
+        *method_counts++ = method_data >> 16;
+        *parameters++ = d->pfifo.regs[NV_PFIFO_CACHE1_DATA + (get_index * 8)];
+        ++count;
+
+        get_index = (get_index + 1) & (NV2A_CACHE1_SIZE - 1);
+    } while (get_index != put_index && count < NV2A_CACHE1_SIZE);
+
+    return count;
+}
+
+static inline void consume_cache1(NV2AState *d)
+{
+    uint32_t methods[NV2A_CACHE1_SIZE];
+    uint32_t method_counts[NV2A_CACHE1_SIZE];
+    uint32_t parameters[NV2A_CACHE1_SIZE];
+    ssize_t num_entries =
+        linearize_cache1(d, methods, method_counts, parameters);
+
+    const uint32_t *method_ptr = methods;
+    const uint32_t *method_count_ptr = method_counts;
+    uint32_t *word_ptr = parameters;
+
+    ssize_t index = 0;
+    while (index < num_entries) {
+        ssize_t max_lookahead_words = num_entries - index;
+        ssize_t method_words_available =
+            MIN(*method_count_ptr, max_lookahead_words);
+
+        ssize_t num_words_processed =
+            pfifo_run_puller(d, *method_ptr, *word_ptr, word_ptr,
+                             method_words_available, max_lookahead_words);
+
+        if (num_words_processed < 0) {
+            break;
+        }
+        index += num_words_processed;
+        method_ptr += num_words_processed;
+        method_count_ptr += num_words_processed;
+        word_ptr += num_words_processed;
+
+        d->pfifo.regs[NV_PFIFO_CACHE1_STATUS] &=
+            ~NV_PFIFO_CACHE1_STATUS_HIGH_MARK;
+        d->pfifo.regs[NV_PFIFO_CACHE1_GET] =
+            (d->pfifo.regs[NV_PFIFO_CACHE1_GET] + num_words_processed * 4) &
+            ((NV2A_CACHE1_SIZE - 1) * 4);
     }
 
-    return num_proc;
+    if (index >= num_entries) {
+        d->pfifo.regs[NV_PFIFO_CACHE1_STATUS] |=
+            NV_PFIFO_CACHE1_STATUS_LOW_MARK;
+    }
 }
 
 static bool pfifo_pusher_should_stall(NV2AState *d)
@@ -259,10 +322,15 @@ static void pfifo_run_pusher(NV2AState *d)
     uint32_t *dma_put = &d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT];
     uint32_t *dma_dcount = &d->pfifo.regs[NV_PFIFO_CACHE1_DMA_DCOUNT];
     uint32_t *status = &d->pfifo.regs[NV_PFIFO_CACHE1_STATUS];
+    const uint32_t cache1_get_index = d->pfifo.regs[NV_PFIFO_CACHE1_GET] / 4;
+    uint32_t *cache1_put_reg = &d->pfifo.regs[NV_PFIFO_CACHE1_PUT];
+    assert((*cache1_put_reg % 4) == 0 && "NV_PFIFO_CACHE1_PUT misaligned");
+    uint32_t cache1_put_index = *cache1_put_reg / 4;
 
     if (!GET_MASK(*push0, NV_PFIFO_CACHE1_PUSH0_ACCESS) ||
         !GET_MASK(*dma_push, NV_PFIFO_CACHE1_DMA_PUSH_ACCESS) ||
-        GET_MASK(*dma_push, NV_PFIFO_CACHE1_DMA_PUSH_STATUS)) {
+        GET_MASK(*dma_push, NV_PFIFO_CACHE1_DMA_PUSH_STATUS) ||
+        *status & NV_PFIFO_CACHE1_STATUS_HIGH_MARK) {
         return;
     }
 
@@ -302,12 +370,7 @@ static void pfifo_run_pusher(NV2AState *d)
             break;
         }
 
-        size_t num_words_available = dma_put_v - dma_get_v;
-        assert(num_words_available % 4 == 0);
-        num_words_available /= 4;
-
-        uint32_t *word_ptr = (uint32_t*)(dma + dma_get_v);
-        uint32_t word = ldl_le_p(word_ptr);
+        uint32_t word = ldl_le_p((uint32_t*)(dma + dma_get_v));
         dma_get_v += 4;
 
         uint32_t method_type =
@@ -323,6 +386,11 @@ static void pfifo_run_pusher(NV2AState *d)
             GET_MASK(*dma_subroutine, NV_PFIFO_CACHE1_DMA_SUBROUTINE_STATE);
 
         if (method_count) {
+            if (*status & NV_PFIFO_CACHE1_STATUS_HIGH_MARK) {
+                pfifo_kick(d);
+                break;
+            }
+
             /* data word of methods command */
             d->pfifo.regs[NV_PFIFO_CACHE1_DMA_DATA_SHADOW] = word;
 
@@ -333,26 +401,27 @@ static void pfifo_run_pusher(NV2AState *d)
             SET_MASK(method_entry, NV_PFIFO_CACHE1_METHOD_SUBCHANNEL,
                      method_subchannel);
 
+            assert(cache1_put_index < NV2A_CACHE1_SIZE);
+            d->pfifo.regs[NV_PFIFO_CACHE1_METHOD + cache1_put_index * 8] =
+                method_entry | (method_count << 16);
+            d->pfifo.regs[NV_PFIFO_CACHE1_DATA + cache1_put_index * 8] = word;
+
+            cache1_put_index = (cache1_put_index + 1) & (NV2A_CACHE1_SIZE - 1);
+            *cache1_put_reg = cache1_put_index * 4;
+
             *status &= ~NV_PFIFO_CACHE1_STATUS_LOW_MARK;
-
-            ssize_t num_words_processed =
-                pfifo_run_puller(d, method_entry, word, word_ptr,
-                                 MIN(method_count, num_words_available),
-                                 num_words_available);
-            if (num_words_processed < 0) {
-                break;
+            if (cache1_put_index == cache1_get_index) {
+                *status |= NV_PFIFO_CACHE1_STATUS_HIGH_MARK;
             }
-
-            dma_get_v += (num_words_processed-1)*4;
 
             if (method_type == NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE_INC) {
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD,
-                         (method + 4*num_words_processed) >> 2);
+                         (method + 4) >> 2);
             }
             SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD_COUNT,
-                     method_count - MIN(method_count, num_words_processed));
+                     method_count - 1);
 
-            (*dma_dcount) += num_words_processed;
+            (*dma_dcount)++;
         } else {
             /* no command active - this is the first word of a new one */
             d->pfifo.regs[NV_PFIFO_CACHE1_DMA_RSVD_SHADOW] = word;
@@ -423,7 +492,7 @@ static void pfifo_run_pusher(NV2AState *d)
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_ERROR,
                          NV_PFIFO_CACHE1_DMA_STATE_ERROR_RESERVED_CMD);
                 // break;
-                assert(false);
+                assert(!"pb reserved cmd");
             }
         }
 
@@ -465,6 +534,7 @@ void *pfifo_thread(void *arg)
 
         if (!d->pfifo.halt) {
             pfifo_run_pusher(d);
+            consume_cache1(d);
         }
 
         pgraph_process_pending_reports(d);

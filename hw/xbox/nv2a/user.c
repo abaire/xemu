@@ -92,9 +92,11 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
             switch (addr & 0xFFFF) {
             case NV_USER_DMA_PUT:
                 d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT] = val;
+                pfifo_kick(d);
                 break;
             case NV_USER_DMA_GET:
                 d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] = val;
+                pfifo_kick(d);
                 break;
             case NV_USER_REF:
                 d->pfifo.regs[NV_PFIFO_CACHE1_REF] = val;
