@@ -1486,7 +1486,7 @@
 #define NV2A_CRYSTAL_FREQ 16666666
 #define NV2A_NUM_CHANNELS 32
 #define NV2A_NUM_SUBCHANNELS 8
-#define NV2A_CACHE1_SIZE 128
+#define NV2A_CACHE1_SIZE 256
 
 /* This is a multi-use limit. Testing on an Xbox 1.0, it is possible to send
  * arrays of at least 0x0FFFFF elements without issue, however sending
