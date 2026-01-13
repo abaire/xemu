@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, arm64]
-        configuration: [debug, release]
+        configuration: [debug]
     container:
       image: ghcr.io/xemu-project/xemu-win64-toolchain-${{ matrix.arch == 'x86_64' && 'gcc:sha-18018f1' || 'llvm:sha-18018f1' }}
     defaults:
@@ -50,11 +50,13 @@ jobs:
         if [[ "${{ matrix.configuration }}" == "debug" ]]; then
           opts=(
             --debug
+            --enable-renderdoc
           )
         elif [[ "${{ matrix.arch }}" == "x86_64" ]]; then
           opts=(
             --extra-cflags="-flto-incremental=${LTO_CACHE_DIR} -flto-partition=cache"
             -Db_lto=true
+            --enable-renderdoc
           )
           mkdir -p ${LTO_CACHE_DIR}
         elif [[ "${{ matrix.arch }}" == "arm64" ]]; then
@@ -66,6 +68,8 @@ jobs:
         fi
         echo "XEMU_BUILD_OPTIONS=${opts[*]}" >> "$GITHUB_ENV"
     - name: Compile
+      env:
+        CFLAGS: -DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1
       run: ./build.sh -p win64-cross ${XEMU_BUILD_OPTIONS}
     - name: Report ccache stats
       run: ccache -s
@@ -85,7 +89,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, arm64]
-        configuration: [debug, release]
+        configuration: [debug]
     steps:
     - name: Download artifacts
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
