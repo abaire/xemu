@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, aarch64]
-        configuration: [debug, release]
+        configuration: [debug]
     env:
       ARTIFACT_NAME: xemu-ubuntu-${{ matrix.arch }}-${{ matrix.configuration }}
       CCACHE_DIR: /tmp/xemu-ccache
@@ -23,7 +23,7 @@ jobs:
       LTO_CACHE_DIR: /tmp/xemu-lto-cache
       LTO_CACHE_MAXSIZE: 512m
       DEB_BUILD_MAINT_OPTIONS: optimize=-lto
-      DEB_CFLAGS_MAINT_APPEND: -gdwarf-4 -gstrict-dwarf
+      DEB_CFLAGS_MAINT_APPEND: -gdwarf-4 -gstrict-dwarf -DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1
       DEB_CXXFLAGS_MAINT_APPEND: -gdwarf-4 -gstrict-dwarf
       DEB_LDFLAGS_MAINT_APPEND: -Wl,--build-id=sha1
       CC: ccache clang-21
@@ -39,6 +39,7 @@ jobs:
         if [[ "${{ matrix.configuration }}" == "debug" ]]; then
           opts=(
             --debug
+            --enable-renderdoc
           )
         else
           opts=(
@@ -47,6 +48,7 @@ jobs:
             -Db_lto_mode=thin
             -Db_thinlto_cache=true
             -Db_thinlto_cache_dir="$LTO_CACHE_DIR"
+            --enable-renderdoc
           )
           mkdir -p ${LTO_CACHE_DIR}
         fi
