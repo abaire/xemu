@@ -1090,7 +1090,7 @@ ERST
 
 SRST
 ``dump-guest-memory [-p]`` *filename* *begin* *length*
-  \ 
+  \
 ``dump-guest-memory [-z|-l|-s|-w]`` *filename*
   Dump guest memory to *protocol*. The file can be processed with crash or
   gdb. Without ``-z|-l|-s|-w``, the dump format is ELF.
@@ -1859,3 +1859,20 @@ SRST
   List event channels in the guest
 ERST
 #endif
+
+HXCOMM <abaire>
+    {
+        .name       = "plugin",
+        .args_type  = "name:s,line:S?",
+        .params     = "name [args...]",
+        .help       = "send a command to a registered plugin",
+        .cmd        = hmp_plugin_cmd,
+    },
+
+SRST
+``plugin``
+  Runs an arbitrary command registered by a TCG plugin.
+  The first parameter is the command name registered by the plugin.
+ERST
+
+HXCOMM </abaire>
