@@ -157,11 +157,13 @@ endforeach
 ###########################################
 
 xemu_version_cmd = [find_program('scripts/xemu-version.sh'),
-                    meson.current_source_dir()]
+                    meson.current_source_dir(),
+                    'xemu-version-macro.h']
 xemu_version = custom_target('xemu-version-macro.h',
                              output: 'xemu-version-macro.h',
                              command: xemu_version_cmd,
-                             capture: true,
+                             capture: false,
+                             console: true,
                              build_by_default: true,
                              build_always_stale: true)
 
