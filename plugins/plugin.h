@@ -118,4 +118,10 @@ struct qemu_plugin_scoreboard *plugin_scoreboard_new(size_t element_size);
 
 void plugin_scoreboard_free(struct qemu_plugin_scoreboard *score);
 
+// <abaire>
+void qemu_plugin_register_command(const char *name, void (*cb)(const char *));
+bool qemu_plugin_dispatch_cmd(const char *name, const char *args);
+void qemu_plugin_unregister_command(const char *name);
+// </abaire>
+
 #endif /* PLUGIN_H */
