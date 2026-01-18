@@ -4,11 +4,19 @@
 #include <pthread.h>
 #include <semaphore.h>
 
+struct QemuThread {
+    pthread_t thread;
+};
+
 struct QemuMutex {
     pthread_mutex_t lock;
 #ifdef CONFIG_DEBUG_MUTEX
     const char *file;
     int line;
+
+    struct QemuThread owner;
+    char thread_name_buf[32];
+    const char *thread_name;
 #endif
     bool initialized;
 };
@@ -39,10 +47,6 @@ struct QemuEvent {
 #endif
     unsigned value;
     bool initialized;
-};
-
-struct QemuThread {
-    pthread_t thread;
 };
 
 #endif
