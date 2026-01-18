@@ -209,6 +209,9 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         if (method >= 0x180 && method < 0x200) {
             //bql_lock();
             RAMHTEntry entry = ramht_lookup(d, parameter);
+            if (!entry.valid) {
+                fprintf(stderr, "Method 0x%X references invalid object 0x%X\n", method, parameter);
+            }
             assert(entry.valid);
             // assert(entry.channel_id == state->channel_id);
             parameter = entry.instance;
@@ -296,7 +299,8 @@ static void pfifo_run_pusher(NV2AState *d)
         uint32_t dma_put_v = *dma_put;
         if (dma_get_v == dma_put_v) break;
         if (dma_get_v >= dma_len) {
-            assert(false);
+            fprintf(stderr, "dma_get_v 0x%X >= dma_len 0x%X\n", dma_get_v, dma_len);
+            assert(!"dma_get_v >= dma_len");
             SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_ERROR,
                      NV_PFIFO_CACHE1_DMA_STATE_ERROR_PROTECTION);
             break;
