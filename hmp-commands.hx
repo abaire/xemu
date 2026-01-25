@@ -450,6 +450,33 @@ SRST
   Start gdbserver session (default *port*\=1234)
 ERST
 
+
+    {
+        .name       = "s",
+        .args_type  = "start:l,end:l,data:s,type:s,",
+        .params     = "start end data type",
+        .help       = "search virtual memory between 'start' and 'end' for 'data' (which is of 'type').",
+        .cmd = hmp_memory_search,
+    },
+
+SRST
+``s/``\ *fmt* *addr* *data*
+  Search virtual memory starting at *addr* for *data*.
+ERST
+
+    {
+        .name       = "sp",
+        .args_type  = "start:l,end:l,data:s,type:s,",
+        .params     = "start end data type",
+        .help       = "search physical memory between 'start' and 'end' for 'data' (which is of 'type').",
+        .cmd = hmp_physical_memory_search,
+    },
+
+SRST
+``s/``\ *fmt* *addr* *data*
+  Search physical memory starting at *addr* for *data*.
+ERST
+
     {
         .name       = "x",
         .args_type  = "fmt:/,addr:l",
@@ -1095,7 +1122,7 @@ ERST
 
 SRST
 ``dump-guest-memory [-p]`` *filename* *begin* *length*
-  \ 
+  \
 ``dump-guest-memory [-z|-l|-s|-w]`` *filename*
   Dump guest memory to *protocol*. The file can be processed with crash or
   gdb. Without ``-z|-l|-s|-w``, the dump format is ELF.
@@ -1867,3 +1894,20 @@ SRST
   List event channels in the guest
 ERST
 #endif
+
+HXCOMM <abaire>
+    {
+        .name       = "plugin",
+        .args_type  = "name:s,line:S?",
+        .params     = "name [args...]",
+        .help       = "send a command to a registered plugin",
+        .cmd        = hmp_plugin_cmd,
+    },
+
+SRST
+``plugin``
+  Runs an arbitrary command registered by a TCG plugin.
+  The first parameter is the command name registered by the plugin.
+ERST
+
+HXCOMM </abaire>
