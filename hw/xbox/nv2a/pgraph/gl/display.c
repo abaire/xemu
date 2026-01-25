@@ -24,6 +24,7 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/util.h"
 #include "renderer.h"
+#include "debug.h"
 
 #include <math.h>
 
@@ -101,7 +102,17 @@ void pgraph_gl_init_display(NV2AState *d)
     glGenBuffers(1, &r->disp_rndr.vbo);
     glBindBuffer(GL_ARRAY_BUFFER, r->disp_rndr.vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_STATIC_DRAW);
+
     glGenFramebuffers(1, &r->disp_rndr.fbo);
+    {
+        GLint prev_fbo = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, r->disp_rndr.fbo);
+        NV2A_GL_DLABEL(GL_FRAMEBUFFER, r->disp_rndr.fbo,
+                       "Display renderer FBO");
+        glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
+    }
+
     glGenTextures(1, &r->disp_rndr.pvideo_tex);
     assert(glGetError() == GL_NO_ERROR);
 
