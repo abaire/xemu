@@ -153,6 +153,8 @@ static void init_render_to_texture(PGRAPHState *pg)
     glBindBuffer(GL_ARRAY_BUFFER, r->s2t_rndr.vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_STATIC_DRAW);
     glGenFramebuffers(1, &r->s2t_rndr.fbo);
+    NV2A_GL_DLABEL(GL_FRAMEBUFFER, r->s2t_rndr.fbo,
+                   "Surface to texture renderer FBO");
 }
 
 static void finalize_render_to_texture(PGRAPHState *pg)
