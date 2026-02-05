@@ -26,6 +26,8 @@
 #define CLOCK_LOW_MASK 0xffffffe0
 #define ALARM_MASK 0xffffffe0
 
+#define LAG_OFFSET 0
+
 static void ptimer_alarm_fired(void *opaque);
 
 void ptimer_reset(NV2AState *d)
@@ -58,10 +60,11 @@ static uint64_t get_ptimer_clock(NV2AState *d, uint64_t absolute_clock)
            0x1fffffffffffffffULL;
 }
 
+//! Converts ticks (in register range) to nanoseconds.
 static uint64_t ptimer_ticks_to_ns(NV2AState *d, uint64_t ticks)
 {
     uint64_t gpu_ticks =
-        muldiv64(ticks, d->ptimer.numerator, d->ptimer.denominator);
+        muldiv64((ticks >> 5), d->ptimer.numerator, d->ptimer.denominator);
     return muldiv64(gpu_ticks, NANOSECONDS_PER_SECOND,
                     d->pramdac.core_clock_freq);
 }
@@ -81,8 +84,11 @@ static void schedule_qemu_timer(NV2AState *d)
         ((uint64_t)d->ptimer.alarm_time_high << 32) + d->ptimer.alarm_time;
 
     uint64_t diff_ns = 0;
-    if (alarm_time > now) {
-        diff_ns = ptimer_ticks_to_ns(d, (alarm_time - now) >> 5);
+    if (alarm_time > (now + LAG_OFFSET)) {
+        diff_ns = ptimer_ticks_to_ns(d, (alarm_time - now));
+        if (diff_ns > LAG_OFFSET) {
+            diff_ns -= LAG_OFFSET;
+        }
         last_schedule_now = now;
         last_schedule_alarm = alarm_time;
         last_schedule_diff_ns = diff_ns;
@@ -114,7 +120,7 @@ static void ptimer_alarm_fired(void *opaque)
         fprintf(stderr,
                 "PTIMER alarm fired after %llu ns. Was scheduled for %llu ns\n",
                 delta_time, last_schedule_diff_ns);
-        if (delta_time > last_alarm_fire) {
+        if (delta_time > last_schedule_diff_ns) {
             fprintf(stderr, "  Late by %llu ns\n",
                     delta_time - last_schedule_diff_ns);
         }
@@ -126,7 +132,7 @@ static void ptimer_alarm_fired(void *opaque)
     uint64_t alarm_time =
         d->ptimer.alarm_time + ((uint64_t)d->ptimer.alarm_time_high << 32);
 
-    if (alarm_time <= now) {
+    if (alarm_time <= now + LAG_OFFSET) {
         d->ptimer.pending_interrupts |= NV_PTIMER_INTR_0_ALARM;
         d->ptimer.alarm_time_high = (now >> 32) + 1;
         nv2a_update_irq(d);
