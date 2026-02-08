@@ -859,6 +859,27 @@ DEF_METHOD(NV097, NO_OPERATION)
 DEF_METHOD(NV097, WAIT_FOR_IDLE)
 {
     d->pgraph.renderer->ops.surface_update(d, false, true, true);
+
+//    // DONOTSUBMIT
+//    if (parameter != 0 && parameter > 10) {
+//        int cycle = parameter % 5;
+//        if (cycle == 1 || cycle == 2) {
+//            int total_ms = (cycle == 1) ? 2000 : 5000;
+//
+//            int sleep_sec = total_ms / 1000;
+//            int sleep_ms = total_ms - (sleep_sec * 1000);
+//            struct timespec ts = { .tv_sec = sleep_sec,
+//                                   .tv_nsec = sleep_ms * SCALE_MS };
+//            fprintf(stderr, "Sleep in WAIT_FOR_IDLE for %d ms\n", sleep_ms);
+//
+//            while (nanosleep(&ts, &ts) == -1) {
+//                fprintf(stderr, "Sleep failed %d\n", errno);
+//                if (errno != EINTR) {
+//                    break;
+//                }
+//            }
+//        }
+//    }
 }
 
 DEF_METHOD(NV097, SET_FLIP_READ)

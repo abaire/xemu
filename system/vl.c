@@ -2675,6 +2675,10 @@ static void qemu_process_early_options(void)
                 exit(1);
             }
         }
+
+//        // DONOTSUBMIT
+//        mask |= CPU_LOG_TB_NOCHAIN;
+
         qemu_set_log_filename_flags(log_file, mask, &error_fatal);
     }
 
@@ -4053,6 +4057,16 @@ void qemu_init(int argc, char **argv)
     qemu_apply_machine_options(machine_opts_dict);
     qobject_unref(machine_opts_dict);
     phase_advance(PHASE_MACHINE_CREATED);
+
+    /* antigravity: Default to icount if not specified */
+//    {
+//        QemuOptsList *icount_opts = qemu_find_opts("icount");
+//        if (icount_opts && QTAILQ_EMPTY(&icount_opts->head)) {
+//            QemuOpts *opts = qemu_opts_create(icount_opts, NULL, 0, &error_abort);
+//            qemu_opt_set(opts, "shift", "auto", &error_abort);
+//            qemu_opt_set(opts, "sleep", "on", &error_abort);
+//        }
+//    }
 
     /*
      * Note: uses machine properties such as kernel-irqchip, must run

@@ -162,6 +162,10 @@ bool x86_need_replay_interrupt(int interrupt_request)
     return !(interrupt_request & CPU_INTERRUPT_POLL);
 }
 
+extern uint64_t g_debug_ptimer_fire_time;
+static uint64_t g_debug_ptimer_last_interrupt_time;
+extern uint64_t get_qpc(void);
+
 bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     X86CPU *cpu = X86_CPU(cs);
@@ -204,8 +208,22 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         cpu_svm_check_intercept_param(env, SVM_EXIT_INTR, 0, 0);
         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD | CPU_INTERRUPT_VIRQ);
         intno = cpu_get_pic_interrupt(env);
-        qemu_log_mask(CPU_LOG_INT,
-                      "Servicing hardware INT=0x%02x\n", intno);
+        qemu_log_mask(CPU_LOG_INT, "Servicing hardware INT=0x%02x\n", intno);
+
+        /* Trace NV2A interrupt latency */
+        if (g_debug_ptimer_fire_time != g_debug_ptimer_last_interrupt_time) {
+            uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+            int64_t delta = now - g_debug_ptimer_fire_time;
+            uint64_t qpc_clock = get_qpc();
+            fprintf(stderr,
+                    "PCI INT FIRED at 0x%X 0x%X virt 0x%X 0x%X qpc: delta "
+                    "since alarm raised virt %lld ns %llu ms\n",
+                    (uint32_t)(now >> 32), (uint32_t)now,
+                    (uint32_t)(qpc_clock >> 32), (uint32_t)(qpc_clock), delta,
+                    delta / SCALE_MS);
+            g_debug_ptimer_last_interrupt_time = g_debug_ptimer_fire_time;
+        }
+
         do_interrupt_x86_hardirq(env, intno, 1);
         break;
     case CPU_INTERRUPT_VIRQ:

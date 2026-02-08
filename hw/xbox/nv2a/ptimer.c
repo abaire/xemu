@@ -22,6 +22,8 @@
 
 #include "nv2a_int.h"
 
+#include "system/cpus.h"
+
 #define CLOCK_HIGH_MASK 0x1fffffff
 #define CLOCK_LOW_MASK 0xffffffe0
 #define ALARM_MASK 0xffffffe0
@@ -73,6 +75,12 @@ static uint64_t last_schedule_now = 0;
 static uint64_t last_schedule_alarm = 0;
 static uint64_t last_schedule_diff_ns = 0;
 
+uint64_t get_qpc()
+{
+    return muldiv64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL), 733333333,
+                    NANOSECONDS_PER_SECOND);
+}
+
 static void schedule_qemu_timer(NV2AState *d)
 {
     if (!(d->ptimer.enabled_interrupts & NV_PTIMER_INTR_EN_0_ALARM)) {
@@ -92,8 +100,15 @@ static void schedule_qemu_timer(NV2AState *d)
         last_schedule_now = now;
         last_schedule_alarm = alarm_time;
         last_schedule_diff_ns = diff_ns;
-        fprintf(stderr, "Schedule ptimer alarm %llu - now %llu = %llu ns\n",
-                alarm_time, now, diff_ns);
+        int64_t virt_clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        int64_t qpc_clock = get_qpc();
+
+        fprintf(stderr,
+                "\tSchedule ptimer alarm now 0x%X 0x%X virt 0x%X 0x%X qpc "
+                "ptimer: %llu - now %llu = %llu ns\n",
+                (uint32_t)(virt_clock >> 32), (uint32_t)virt_clock,
+                (uint32_t)(qpc_clock >> 32), (uint32_t)qpc_clock, alarm_time,
+                now, diff_ns);
     } else {
         fprintf(
             stderr,
@@ -106,6 +121,8 @@ static void schedule_qemu_timer(NV2AState *d)
 }
 
 static uint64_t last_alarm_fire = 0;
+uint64_t g_debug_ptimer_fire_time = 0;
+
 static void ptimer_alarm_fired(void *opaque)
 {
     NV2AState *d = (NV2AState *)opaque;
@@ -116,28 +133,44 @@ static void ptimer_alarm_fired(void *opaque)
 
     uint64_t now = get_ptimer_clock(d, ptimer_get_absolute_clock(d));
     if (last_alarm_fire) {
+        uint64_t now_virtual = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
         uint64_t delta_time = now - last_alarm_fire;
+        uint64_t qpc_clock = get_qpc();
         fprintf(stderr,
-                "PTIMER alarm fired after %llu ns. Was scheduled for %llu ns\n",
-                delta_time, last_schedule_diff_ns);
+                "\tPTIMER alarm fired at 0x%X 0x%X virt 0x%X 0x%X qpc after "
+                "%llu ns ptimer. Was "
+                "scheduled for %llu ns ptimer\n",
+                (uint32_t)(now_virtual >> 32), (uint32_t)now_virtual,
+                (uint32_t)(qpc_clock >> 32), (uint32_t)qpc_clock, delta_time,
+                last_schedule_diff_ns);
         if (delta_time > last_schedule_diff_ns) {
-            fprintf(stderr, "  Late by %llu ns\n",
-                    delta_time - last_schedule_diff_ns);
+            fprintf(stderr, "\t\tLate by %llu ns (ptimer) %llu ms\n",
+                    delta_time - last_schedule_diff_ns,
+                    (delta_time - last_schedule_diff_ns) / SCALE_MS);
         }
     } else {
-        fprintf(stderr, "PTIMER alarm fired!\n");
+        fprintf(stderr, "\tPTIMER alarm fired!\n");
     }
     last_alarm_fire = now;
 
     uint64_t alarm_time =
         d->ptimer.alarm_time + ((uint64_t)d->ptimer.alarm_time_high << 32);
 
-    if (alarm_time <= now + LAG_OFFSET) {
+    if (alarm_time <= now) {
         d->ptimer.pending_interrupts |= NV_PTIMER_INTR_0_ALARM;
         d->ptimer.alarm_time_high = (now >> 32) + 1;
+        g_debug_ptimer_fire_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        uint64_t qpc_clock = get_qpc();
+        fprintf(stderr,
+                "\tPTIMER ALARM FLAGGED at 0x%X 0x%X virt 0x%X 0x%X qpc\n",
+                (uint32_t)(g_debug_ptimer_fire_time >> 32),
+                (uint32_t)g_debug_ptimer_fire_time, (uint32_t)(qpc_clock >> 32),
+                (uint32_t)qpc_clock);
+
         nv2a_update_irq(d);
-    } else {
-        fprintf(stderr, "PTIMER alarm fired early, rescheduling\n");
+
+        // This does not help.
+        //        qemu_cpu_kick(qemu_get_cpu(0));
     }
 
     schedule_qemu_timer(d);
@@ -165,17 +198,17 @@ uint64_t ptimer_read(void *opaque, hwaddr addr, unsigned int size)
         uint64_t now = get_ptimer_clock(d, ptimer_get_absolute_clock(d));
         r = now & 0xffffffff;
 
-        fprintf(stderr, "READ PTIMER TIME_0: 0x%X = 0x%X\n", addr, r);
+        //        fprintf(stderr, "READ PTIMER TIME_0: 0x%X = 0x%X\n", addr, r);
     } break;
     case NV_PTIMER_TIME_1: {
         uint64_t now = get_ptimer_clock(d, ptimer_get_absolute_clock(d));
         r = (now >> 32) & CLOCK_HIGH_MASK;
 
-        fprintf(stderr, "READ PTIMER TIME_1: 0x%X = 0x%X\n", addr, r);
+        //        fprintf(stderr, "READ PTIMER TIME_1: 0x%X = 0x%X\n", addr, r);
     } break;
     case NV_PTIMER_ALARM_0:
         r = d->ptimer.alarm_time;
-        fprintf(stderr, "READ PTIMER ALARM0: 0x%X = 0x%X\n", addr, r);
+        //        fprintf(stderr, "READ PTIMER ALARM0: 0x%X = 0x%X\n", addr, r);
         break;
     default:
         break;
@@ -193,7 +226,21 @@ void ptimer_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     switch (addr) {
     case NV_PTIMER_INTR_0:
-        fprintf(stderr, "\nPTIMER 0x%X (INTR_0) = 0x%X\n", addr, val);
+        if (g_debug_ptimer_fire_time) {
+            int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+            uint64_t qpc_clock = get_qpc();
+            int64_t delta = now - g_debug_ptimer_fire_time;
+            fprintf(stderr,
+                    "\nPTIMER 0x%X (INTR_0) = 0x%X time 0x%X 0x%X virt 0x%X "
+                    "0x%X qpc "
+                    "since alert fire (virt) %llu "
+                    "ns %llu ms\n",
+                    addr, val, (uint32_t)(now >> 32), (uint32_t)now,
+                    (uint32_t)(qpc_clock >> 32), (uint32_t)qpc_clock, delta,
+                    delta / SCALE_MS);
+        } else {
+            fprintf(stderr, "\nPTIMER 0x%X (INTR_0) = 0x%X\n", addr, val);
+        }
         d->ptimer.pending_interrupts &= ~val;
         nv2a_update_irq(d);
         break;
@@ -224,7 +271,7 @@ void ptimer_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
         d->ptimer.alarm_time = val & ALARM_MASK;
         d->ptimer.alarm_time_high = (now >> 32);
-        if (val <= now_time_low) {
+        if (d->ptimer.alarm_time <= now_time_low) {
             ++d->ptimer.alarm_time_high;
 
             fprintf(stderr,
