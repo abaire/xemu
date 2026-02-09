@@ -21,9 +21,12 @@
 
 #include "qemu/osdep.h"
 #include "hw/display/vga_int.h"
+#include "hw/xbox/nv2a/debug_gl.h"
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/util.h"
 #include "renderer.h"
+
+#include "debug.h"
 
 #include <math.h>
 
@@ -102,8 +105,15 @@ void pgraph_gl_init_display(NV2AState *d)
     glBindBuffer(GL_ARRAY_BUFFER, r->disp_rndr.vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_STATIC_DRAW);
     glGenFramebuffers(1, &r->disp_rndr.fbo);
+
+    GLint prev_fbo;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, r->disp_rndr.fbo);
+    NV2A_GL_DLABEL(GL_FRAMEBUFFER, r->disp_rndr.fbo, "Display renderer FBO");
+    glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
+
     glGenTextures(1, &r->disp_rndr.pvideo_tex);
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 
     glo_set_current(g_nv2a_context_render);
 }
@@ -336,7 +346,7 @@ static void render_display(NV2AState *d, SurfaceBinding *surface)
         GL_TEXTURE_2D, r->gl_display_buffer, 0);
     GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
     glDrawBuffers(1, DrawBuffers);
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    ASSERT_FRAMEBUFFER_COMPLETE();
 
     glBindTexture(GL_TEXTURE_2D, surface->gl_buffer);
     glBindVertexArray(r->disp_rndr.vao);
@@ -388,13 +398,13 @@ void pgraph_gl_sync(NV2AState *d)
     /* Wait for queued commands to complete */
     pgraph_gl_upload_surface_data(d, surface, !tcg_enabled());
     gl_fence();
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 
     /* Render framebuffer in display context */
     glo_set_current(g_nv2a_context_display);
     render_display(d, surface);
     gl_fence();
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 
     /* Switch back to original context */
     glo_set_current(g_nv2a_context_render);

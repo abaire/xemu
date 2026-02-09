@@ -21,6 +21,7 @@
 
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "ui/xemu-settings.h"
+#include "hw/xbox/nv2a/debug_gl.h"
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "debug.h"
@@ -152,6 +153,13 @@ static void init_render_to_texture(PGRAPHState *pg)
     glBindBuffer(GL_ARRAY_BUFFER, r->s2t_rndr.vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_STATIC_DRAW);
     glGenFramebuffers(1, &r->s2t_rndr.fbo);
+
+    GLint prev_fbo;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, r->s2t_rndr.fbo);
+    NV2A_GL_DLABEL(GL_FRAMEBUFFER, r->s2t_rndr.fbo,
+                   "Surface to texture renderer FBO");
+    glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
 }
 
 static void finalize_render_to_texture(PGRAPHState *pg)
@@ -233,8 +241,8 @@ static void render_surface_to(NV2AState *d, SurfaceBinding *surface,
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, gl_target,
                            gl_texture, 0);
     glDrawBuffers(1, draw_buffers);
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_FRAMEBUFFER_COMPLETE();
+    ASSERT_NO_GL_ERROR();
 
     float color[] = { 0.0f, 0.0f, 0.0f, 0.0f };
     glBindTexture(GL_TEXTURE_2D, surface->gl_buffer);
@@ -648,8 +656,7 @@ static void bind_current_surface(NV2AState *d)
     }
 
     if (r->color_binding || r->zeta_binding) {
-        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-               GL_FRAMEBUFFER_COMPLETE);
+        ASSERT_FRAMEBUFFER_COMPLETE();
     }
 }
 
@@ -708,7 +715,7 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     glFramebufferTexture2D(GL_FRAMEBUFFER, surface->fmt.gl_attachment,
                            GL_TEXTURE_2D, surface->gl_buffer, 0);
 
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    ASSERT_FRAMEBUFFER_COMPLETE();
 
     /* Read surface into memory */
     uint8_t *gl_read_buf = pixels;
@@ -1268,8 +1275,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 
         glFramebufferTexture2D(GL_FRAMEBUFFER, entry.fmt.gl_attachment,
                                GL_TEXTURE_2D, found->gl_buffer, 0);
-        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-               GL_FRAMEBUFFER_COMPLETE);
+        ASSERT_FRAMEBUFFER_COMPLETE();
 
         surface->buffer_dirty = false;
     }

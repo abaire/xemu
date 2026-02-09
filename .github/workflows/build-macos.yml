@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, arm64]
-        configuration: [debug, release]
+        configuration: [debug]
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -59,6 +59,7 @@ jobs:
         if [[ "${{ matrix.configuration }}" == "debug" ]]; then
           opts=(
             --debug
+            --enable-renderdoc
           )
         else
           opts=(
@@ -66,11 +67,14 @@ jobs:
             -Db_lto_mode=thin
             -Db_thinlto_cache=true
             -Db_thinlto_cache_dir="$LTO_CACHE_DIR"
+            --enable-renderdoc
           )
           mkdir -p ${LTO_CACHE_DIR}
         fi
         echo "XEMU_BUILD_OPTIONS=${opts[*]}" >> "$GITHUB_ENV"
     - name: Compile
+      env:
+         CFLAGS: -DDEBUG_NV2A_GL=1 -DSTREAM_GL_DEBUG_MESSAGES=1
       run: ./build.sh -a ${{ matrix.arch }} ${XEMU_BUILD_OPTIONS}
     - name: Report ccache stats
       run: ccache -s
@@ -98,7 +102,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        configuration: [debug, release]
+        configuration: [debug]
     steps:
     - name: Download architecture-specific builds
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v4
