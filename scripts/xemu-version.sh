@@ -3,6 +3,7 @@
 set -eu
 
 dir="$1"
+output_file="$2"
 XEMU_DATE=$(date -u)
 XEMU_COMMIT=$( \
   cd "$dir"; \
@@ -36,7 +37,13 @@ XEMU_VERSION_MINOR=$(get_version_dot 2)
 XEMU_VERSION_PATCH=$(get_version_dot 3)
 XEMU_VERSION_COMMIT=$(get_version_field 2)
 
-cat <<EOF
+echo "xemu-version.sh" >&2
+echo "Version ${XEMU_VERSION}" >&2
+echo "Components: ${XEMU_VERSION_MAJOR} ${XEMU_VERSION_MINOR} ${XEMU_VERSION_PATCH} ${XEMU_VERSION_COMMIT}" >&2
+echo "Commit: ${XEMU_DATE}" >&2
+echo "Date: ${XEMU_DATE}" >&2
+
+cat <<EOF > "$output_file"
 #define XEMU_VERSION       "$XEMU_VERSION"
 #define XEMU_VERSION_MAJOR $XEMU_VERSION_MAJOR
 #define XEMU_VERSION_MINOR $XEMU_VERSION_MINOR
