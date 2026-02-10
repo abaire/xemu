@@ -216,9 +216,8 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
             int64_t delta = now - g_debug_ptimer_fire_time;
             uint64_t qpc_clock = get_qpc();
             fprintf(stderr,
-                    "PCI INT FIRED at 0x%X 0x%X virt 0x%X 0x%X qpc: delta "
+                    "PCI INT FIRED at 0x%X 0x%X qpc: delta "
                     "since alarm raised virt %lld ns %llu ms\n",
-                    (uint32_t)(now >> 32), (uint32_t)now,
                     (uint32_t)(qpc_clock >> 32), (uint32_t)(qpc_clock), delta,
                     delta / SCALE_MS);
             g_debug_ptimer_last_interrupt_time = g_debug_ptimer_fire_time;
