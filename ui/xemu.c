@@ -303,7 +303,8 @@ static void set_full_screen(struct xemu_console *scon, bool set)
                                 SDL_GetPixelFormatName(modes[i]->format));
                     }
                     // First mode is the highest resolution, typically the native resolution
-                    mode = modes[0];
+                    // DONOTSUBMIT - try 60fps refresh on ROG Ally
+                    mode = modes[1];
                 }
             }
             if (mode) {
