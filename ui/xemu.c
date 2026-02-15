@@ -298,7 +298,7 @@ static void set_full_screen(struct xemu_console *scon, bool set)
                 }
             }
             if (mode) {
-                fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate);
+                fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f format:0x%X\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate, mode->format);
             } else {
                 fprintf(stderr, "Failed to get fullscreen display mode: %s\n", SDL_GetError());
             }
