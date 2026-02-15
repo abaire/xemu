@@ -1099,9 +1099,9 @@ static void display_very_early_init(DisplayOptions *o)
     SDL_GL_MakeCurrent(NULL, NULL);
 
     {
-        SDL_Renderer *renderer = SDL_GetRenderer(m_window);
+//        SDL_Renderer *renderer = SDL_GetRenderer(m_window);
         {
-            SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
             SDL_Colorspace colorspace = (SDL_Colorspace)SDL_GetNumberProperty(
                 props, SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
                 SDL_COLORSPACE_UNKNOWN);
@@ -1109,13 +1109,13 @@ static void display_very_early_init(DisplayOptions *o)
         }
         {
             fprintf(stderr, "Force SDL_COLORSPACE\n");
-            SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
             SDL_SetNumberProperty(props,
                                   SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
                                   /*SDL_COLORSPACE_SRGB*/ SDL_COLORSPACE_SRGB_LINEAR);
         }
         {
-            SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
             SDL_Colorspace colorspace = (SDL_Colorspace)SDL_GetNumberProperty(
                 props, SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
                 SDL_COLORSPACE_UNKNOWN);
