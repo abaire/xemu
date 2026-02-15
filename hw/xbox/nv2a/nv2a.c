@@ -23,6 +23,8 @@
 #include "hw/xbox/smbus.h"
 #include "qemu/main-loop.h"
 
+uint64_t g_debug_vblank_fire_time = 0;
+
 void nv2a_update_irq(NV2AState *d)
 {
     /* PFIFO */
@@ -211,6 +213,7 @@ static void nv2a_vga_gfx_update(void *opaque)
     if (!(d->pcrtc.pending_interrupts & NV_PCRTC_INTR_0_VBLANK)) {
         smbus_cx25871_notify_vblank();
         d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
+        g_debug_vblank_fire_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     }
 
     d->pcrtc.raster = 0;
