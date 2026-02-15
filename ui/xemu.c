@@ -293,6 +293,15 @@ static void set_full_screen(struct xemu_console *scon, bool set)
                 int num_modes = 0;
                 modes = SDL_GetFullscreenDisplayModes(display, &num_modes);
                 if (modes && num_modes > 0) {
+                    for (int i = 0; i < num_modes; ++i) {
+                        fprintf(stderr,
+                                "Fullscreen mode %d: %dx%d pixel_density=%f "
+                                "refresh_rate=%f format:0x%X %s\n",
+                                i, modes[i]->w, modes[i]->h,
+                                modes[i]->pixel_density, modes[i]->refresh_rate,
+                                modes[i]->format,
+                                SDL_GetPixelFormatName(modes[i]->format));
+                    }
                     // First mode is the highest resolution, typically the native resolution
                     mode = modes[0];
                 }
