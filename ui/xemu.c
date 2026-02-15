@@ -1112,7 +1112,7 @@ static void display_very_early_init(DisplayOptions *o)
             SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
             SDL_SetNumberProperty(props,
                                   SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
-                                  SDL_COLORSPACE_SRGB);
+                                  /*SDL_COLORSPACE_SRGB*/ SDL_COLORSPACE_SRGB_LINEAR);
         }
         {
             SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
