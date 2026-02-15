@@ -293,12 +293,22 @@ static void set_full_screen(struct xemu_console *scon, bool set)
                 int num_modes = 0;
                 modes = SDL_GetFullscreenDisplayModes(display, &num_modes);
                 if (modes && num_modes > 0) {
+                    for (int i = 0; i < num_modes; ++i) {
+                        fprintf(stderr,
+                                "Fullscreen mode %d: %dx%d pixel_density=%f "
+                                "refresh_rate=%f format:0x%X %s\n",
+                                i, modes[i]->w, modes[i]->h,
+                                modes[i]->pixel_density, modes[i]->refresh_rate,
+                                modes[i]->format,
+                                SDL_GetPixelFormatName(modes[i]->format));
+                    }
                     // First mode is the highest resolution, typically the native resolution
-                    mode = modes[0];
+                    // DONOTSUBMIT - try 60fps refresh on ROG Ally
+                    mode = modes[1];
                 }
             }
             if (mode) {
-                fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate);
+                fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f format:0x%X\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate, mode->format);
             } else {
                 fprintf(stderr, "Failed to get fullscreen display mode: %s\n", SDL_GetError());
             }
@@ -1087,6 +1097,32 @@ static void display_very_early_init(DisplayOptions *o)
     // Initialize offscreen rendering context now
     nv2a_context_init();
     SDL_GL_MakeCurrent(NULL, NULL);
+
+    {
+        SDL_Renderer *renderer = SDL_GetRenderer(m_window);
+        {
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
+            SDL_Colorspace colorspace = (SDL_Colorspace)SDL_GetNumberProperty(
+                props, SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
+                SDL_COLORSPACE_UNKNOWN);
+            fprintf(stderr, "SDL_COLORSPACE (win): 0x%X\n", colorspace);
+        }
+        {
+            fprintf(stderr, "Force SDL_COLORSPACE\n");
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
+            SDL_SetNumberProperty(props,
+                                  SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
+                                  SDL_COLORSPACE_SRGB /*SDL_COLORSPACE_SRGB_LINEAR*/);
+        }
+        {
+            SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
+            SDL_Colorspace colorspace = (SDL_Colorspace)SDL_GetNumberProperty(
+                props, SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
+                SDL_COLORSPACE_UNKNOWN);
+            fprintf(stderr, "SDL_COLORSPACE: 0x%X\n", colorspace);
+        }
+
+    }
 }
 
 static void display_early_init(DisplayOptions *o)
