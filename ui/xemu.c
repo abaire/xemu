@@ -1084,6 +1084,15 @@ static void display_very_early_init(DisplayOptions *o)
     fprintf(stderr, "GL_VERSION: %s\n", glGetString(GL_VERSION));
     fprintf(stderr, "GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
+    {
+        SDL_Renderer *renderer = SDL_GetRenderer(m_window);
+        SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+        SDL_Colorspace colorspace = (SDL_Colorspace)SDL_GetNumberProperty(
+            props, SDL_PROP_RENDERER_OUTPUT_COLORSPACE_NUMBER,
+            SDL_COLORSPACE_UNKNOWN);
+        fprintf(stderr, "SDL_COLORSPACE: 0x%X\n", colorspace);
+    }
+
     // Initialize offscreen rendering context now
     nv2a_context_init();
     SDL_GL_MakeCurrent(NULL, NULL);
