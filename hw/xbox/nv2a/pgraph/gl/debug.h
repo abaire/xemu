@@ -32,6 +32,8 @@
 #include "config-host.h"
 #include <glib.h>
 
+extern uint32_t g_nv2a_current_frame_draw_count;  // abaire
+
 void gl_debug_initialize(void);
 void gl_debug_message(bool cc, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 void gl_debug_group_begin(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
