@@ -42,14 +42,21 @@ static void RunOnMainThread(std::function<void()> &&func)
 static void FileDialogCallbackWrapper(void *userdata,
                                       const char *const *filelist, int filter)
 {
-    assert((intptr_t)userdata == 0x1234 && "Userdata is corrupt");
-    std::unique_ptr<FileDialogCallback> callback(
-        static_cast<FileDialogCallback *>(userdata));
+    fprintf(stderr, "FileDialogCallbackWrapper: 0x%p\n", userdata);
+    std::string path;
     if (filelist && filelist[0]) {
-        std::string path = filelist[0];
-        RunOnMainThread([callback = std::move(*callback),
-                         path = std::move(path)]() { callback(path.c_str()); });
+        path = filelist[0];
     }
+
+    RunOnMainThread([userdata,
+                     path = std::move(path)]() {
+        fprintf(stderr, "FileDialogCallbackWrapper lambda: 0x%p\n", userdata);
+        auto callback = static_cast<FileDialogCallback *>(userdata);
+        if (!path.empty()) {
+            (*callback)(path.c_str());
+        }
+        delete callback;
+    });
 }
 
 // Workaround SDL3 default_location handling:
@@ -83,8 +90,9 @@ void ShowOpenFileDialog(const SDL_DialogFileFilter *filters, int nfilters,
                         FileDialogCallback callback)
 {
     auto *cb = new FileDialogCallback(std::move(callback));
+    fprintf(stderr, "ShowOpenFileDialog: 0x%p\n", cb);
     std::string normalized = NormalizeDefaultLocation(default_location);
-    SDL_ShowOpenFileDialog(FileDialogCallbackWrapper, (void*)0x1234, xemu_get_window(),
+    SDL_ShowOpenFileDialog(FileDialogCallbackWrapper, cb, xemu_get_window(),
                            filters, nfilters,
                            normalized.empty() ? nullptr : normalized.c_str(),
                            false);
@@ -95,7 +103,8 @@ void ShowSaveFileDialog(const SDL_DialogFileFilter *filters, int nfilters,
                         FileDialogCallback callback)
 {
     auto *cb = new FileDialogCallback(std::move(callback));
-    SDL_ShowSaveFileDialog(FileDialogCallbackWrapper, (void*)0x1234, xemu_get_window(),
+    fprintf(stderr, "ShowOpenFileDialog: 0x%p\n", cb);
+    SDL_ShowSaveFileDialog(FileDialogCallbackWrapper, cb, xemu_get_window(),
                            filters, nfilters, default_location);
 }
 
@@ -103,6 +112,7 @@ void ShowOpenFolderDialog(const char *default_location,
                           FileDialogCallback callback)
 {
     auto *cb = new FileDialogCallback(std::move(callback));
-    SDL_ShowOpenFolderDialog(FileDialogCallbackWrapper, (void*)0x1234,
+    fprintf(stderr, "ShowOpenFileDialog: 0x%p\n", cb);
+    SDL_ShowOpenFolderDialog(FileDialogCallbackWrapper, cb,
                              xemu_get_window(), default_location, false);
 }
