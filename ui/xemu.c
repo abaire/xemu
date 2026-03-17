@@ -280,6 +280,44 @@ static void send_mouse_event(struct xemu_console *scon, int dx, int dy,
     qemu_input_event_sync();
 }
 
+static const SDL_DisplayMode *
+get_best_fullscreen_mode(SDL_DisplayMode **modes, int num_modes)
+{
+    static const float TARGET_REFRESH_RATE = 60.f;
+    static const float MIN_REFRESH_RATE = 30.f;
+
+    if (!modes || num_modes <= 0) {
+        return NULL;
+    }
+
+    // First mode is the highest resolution, typically the native resolution
+    const SDL_DisplayMode *mode = modes[0];
+    int screen_width = mode->w;
+    int screen_height = mode->h;
+    float best_refresh_delta = mode->refresh_rate - TARGET_REFRESH_RATE;
+
+    for (int i = 1; i < num_modes; ++i) {
+        const SDL_DisplayMode *candidate = modes[i];
+
+        if (candidate->w < screen_width || candidate->h < screen_height ||
+            candidate->refresh_rate < MIN_REFRESH_RATE) {
+            break;
+        }
+
+        float refresh_delta = candidate->refresh_rate - TARGET_REFRESH_RATE;
+        if (SDL_fabsf(refresh_delta) < SDL_fabsf(best_refresh_delta)) {
+            mode = candidate;
+            best_refresh_delta = refresh_delta;
+        } else if (refresh_delta == best_refresh_delta &&
+                   candidate->format == mode->format &&
+                   candidate->pixel_density > mode->pixel_density) {
+            mode = candidate;
+        }
+    }
+
+    return mode;
+}
+
 static void set_full_screen(struct xemu_console *scon, bool set)
 {
     gui_fullscreen = set;
@@ -292,10 +330,7 @@ static void set_full_screen(struct xemu_console *scon, bool set)
             if (display) {
                 int num_modes = 0;
                 modes = SDL_GetFullscreenDisplayModes(display, &num_modes);
-                if (modes && num_modes > 0) {
-                    // First mode is the highest resolution, typically the native resolution
-                    mode = modes[0];
-                }
+                mode = get_best_fullscreen_mode(modes, num_modes);
             }
             if (mode) {
                 fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate);
