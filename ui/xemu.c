@@ -1403,9 +1403,18 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
+    static int64_t last_update = 0;
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
         gl_render_frame(scon);
+
+        /* Throttle to 60Hz */
+        int64_t deadline = last_update + 16666666;
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        if (now < deadline) {
+            SDL_DelayPrecise(deadline - now);
+        }
+        last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     }
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
