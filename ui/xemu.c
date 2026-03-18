@@ -61,7 +61,7 @@
 #include <SDL3/SDL.h>
 
 #ifndef DEBUG_XEMU_C
-#define DEBUG_XEMU_C 0
+#define DEBUG_XEMU_C 1
 #endif
 
 #if DEBUG_XEMU_C
@@ -821,7 +821,7 @@ static void report_stats(void)
     num_frames += 1;
     if (delta_ms >= 1000) {
         DPRINTF("[[ ");
-        DPRINTF("vblank @%fHz avg", fps);
+        DPRINTF("vblank @%fHz avg, %d frames / %llu ms = %f", fps, num_frames, delta_ms, (double)num_frames / ((double)(delta_ms) / 1000.0));
         DPRINTF(" - bql %"PRId64"ns/iter, %g%% time avg", lock_held_acc/num_frames, (double)lock_held_acc/(double)(delta_ms * 10000.0));
         DPRINTF(" ]]\n");
         lock_held_acc = 0;
@@ -1130,7 +1130,11 @@ static void display_early_init(DisplayOptions *o)
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
-    SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
+    int interval = g_config.display.window.vsync ? 1 : 0;
+    if (!SDL_GL_SetSwapInterval(interval)) {
+        fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
+                SDL_GetError());
+    }
     xemu_hud_init(m_window, m_context);
 }
 
@@ -1403,11 +1407,14 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
+#ifndef DEBUG_XEMU_C
     static int64_t last_update = 0;
+#endif
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
         gl_render_frame(scon);
 
+#ifndef DEBUG_XEMU_C
         /* Throttle to 60Hz */
         int64_t deadline = last_update + 16666666;
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
@@ -1415,6 +1422,7 @@ int main(int argc, char **argv)
             SDL_DelayPrecise(deadline - now);
         }
         last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+#endif
     }
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
