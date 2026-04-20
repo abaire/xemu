@@ -812,6 +812,8 @@ static void *vblank_timer_thread(void *opaque)
 }
 
 #if DEBUG_XEMU_C
+static uint64_t last_forced_delay = 0;
+static uint64_t cumulative_delay = 0;
 static void report_stats(void)
 {
     uint64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
@@ -822,11 +824,15 @@ static void report_stats(void)
     if (delta_ms >= 1000) {
         DPRINTF("[[ ");
         DPRINTF("vblank @%fHz avg, %d frames / %llu ms = %f", fps, num_frames, delta_ms, (double)num_frames / ((double)(delta_ms) / 1000.0));
+        DPRINTF(" - last delay %llu, cumulative %llu", last_forced_delay, cumulative_delay);
         DPRINTF(" - bql %"PRId64"ns/iter, %g%% time avg", lock_held_acc/num_frames, (double)lock_held_acc/(double)(delta_ms * 10000.0));
         DPRINTF(" ]]\n");
+
         lock_held_acc = 0;
         last_reported = now;
         num_frames = 0;
+        last_forced_delay = 0;
+        cumulative_delay = 0;
     }
 }
 #endif
@@ -1407,22 +1413,26 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
-#ifndef DEBUG_XEMU_C
+//#ifndef DEBUG_XEMU_C
     static int64_t last_update = 0;
-#endif
+//#endif
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
         gl_render_frame(scon);
 
-#ifndef DEBUG_XEMU_C
+//#ifndef DEBUG_XEMU_C
         /* Throttle to 60Hz */
         int64_t deadline = last_update + 16666666;
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         if (now < deadline) {
+#ifdef DEBUG_XEMU_C
+            last_forced_delay = deadline - now;
+            cumulative_delay += last_forced_delay;
+#endif
             SDL_DelayPrecise(deadline - now);
         }
         last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-#endif
+//#endif
     }
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
