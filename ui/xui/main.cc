@@ -322,14 +322,70 @@ void xemu_hud_update(void)
     // if (show_demo) ImGui::ShowDemoWindow(&show_demo);
 }
 
+static void host_vsync_test() {
+    const float PAD = 20.0f;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 work_pos = viewport->WorkPos;
+    ImVec2 work_size = viewport->WorkSize;
+
+    // Pin window to the bottom right corner
+    ImVec2 window_pos(work_pos.x + work_size.x - PAD, work_pos.y + work_size.y - PAD);
+    ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.8f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+
+    if (ImGui::Begin("HostVsyncTest", nullptr, flags)) {
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+
+        const int steps = 60;
+        const float block_w = 4.0f;
+        const float block_h = 16.0f;
+        const float track_w = steps * block_w;
+        const float spacing = 4.0f;
+
+        double t = ImGui::GetTime();
+        int idx_60 = (int)(t * 60.0) % steps;
+        int idx_30 = (int)(t * 30.0) % (steps / 2);
+
+        // Draw track backgrounds
+        draw_list->AddRectFilled(p, ImVec2(p.x + track_w, p.y + block_h), IM_COL32(50, 50, 50, 255));
+        draw_list->AddRectFilled(ImVec2(p.x, p.y + block_h + spacing), ImVec2(p.x + track_w, p.y + block_h * 2 + spacing), IM_COL32(50, 50, 50, 255));
+
+        // 60 Hz Block (Red)
+        ImVec2 p60(p.x + (idx_60 * block_w), p.y);
+        draw_list->AddRectFilled(p60, ImVec2(p60.x + block_w, p60.y + block_h), IM_COL32(255, 0, 0, 255));
+
+        // 30 Hz Block (Green)
+        ImVec2 p30(p.x + (idx_30 * block_w * 2.0f), p.y + block_h + spacing);
+        draw_list->AddRectFilled(p30, ImVec2(p30.x + block_w * 2.0f, p30.y + block_h), IM_COL32(0, 255, 0, 255));
+
+        // Reserve space to ensure the window encapsulates the manually drawn primitives
+        ImGui::Dummy(ImVec2(track_w, (block_h * 2) + spacing));
+    }
+    ImGui::End();
+}
+
 void xemu_hud_render()
 {
+    host_vsync_test();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     if (g_vsync != g_config.display.window.vsync) {
         g_vsync = g_config.display.window.vsync;
-        SDL_GL_SetSwapInterval(g_vsync ? 1 : 0);
+
+        if (!g_vsync) {
+            SDL_GL_SetSwapInterval(0);
+        } else if (SDL_GL_SetSwapInterval(-1)) {
+            fprintf(stderr, "VSYNC adaptive\n");
+        } else if (!SDL_GL_SetSwapInterval(1)) {
+            fprintf(stderr, "Failed to set swap interval to 1. %s\n",
+                    SDL_GetError());
+        }
     }
 
     if (g_screenshot_pending) {
