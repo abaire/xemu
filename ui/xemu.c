@@ -845,6 +845,7 @@ static void gl_render_frame(struct xemu_console *scon)
 {
     static bool rendering;
     if (qatomic_xchg(&rendering, true) || qatomic_read(&qemu_exiting)) {
+        fprintf(stderr, "WARNING: gl_render_frame called while rendering\n");
         return;
     }
 
