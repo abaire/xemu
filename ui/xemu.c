@@ -63,10 +63,10 @@
 #ifndef DEBUG_XEMU_C
 // DONOTSUBMIT
 #define DEBUG_XEMU_C 1
-#define DELAY_EVENT_LOOP 1
-#else
-#define DELAY_EVENT_LOOP 0
 #endif
+
+// DONOTSUBMIT
+#define DELAY_EVENT_LOOP 1
 
 #if DEBUG_XEMU_C
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
