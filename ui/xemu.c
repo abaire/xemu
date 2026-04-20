@@ -66,7 +66,7 @@
 #endif
 
 // DONOTSUBMIT
-#define DELAY_EVENT_LOOP 1
+#define DELAY_EVENT_LOOP 0
 
 #if DEBUG_XEMU_C
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
