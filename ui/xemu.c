@@ -1095,7 +1095,16 @@ static void display_early_init(DisplayOptions *o)
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
-    SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
+    int interval = g_config.display.window.vsync ? 1 : 0;
+    fprintf(stderr, "VSYNC setting %s\n", interval ? "ON" : "OFF");
+    if (!interval) {
+        SDL_GL_SetSwapInterval(0);
+    } else if (SDL_GL_SetSwapInterval(-1)) {
+        fprintf(stderr, "VSYNC adaptive\n");
+    } else if (!SDL_GL_SetSwapInterval(1)) {
+        fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
+                SDL_GetError());
+    }
     xemu_hud_init(m_window, m_context);
 }
 
