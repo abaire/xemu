@@ -22,7 +22,7 @@
 #include <pthread_np.h>
 #endif
 
-static bool name_threads;
+static bool name_threads = true;
 
 void qemu_thread_naming(bool enable)
 {
@@ -72,6 +72,10 @@ void qemu_mutex_init(QemuMutex *mutex)
     if (err)
         error_exit(err, __func__);
     qemu_mutex_post_init(mutex);
+
+#ifdef CONFIG_DEBUG_MUTEX
+    mutex->thread_name = NULL;
+#endif
 }
 
 void qemu_mutex_destroy(QemuMutex *mutex)
@@ -95,6 +99,11 @@ void qemu_mutex_lock_impl(QemuMutex *mutex, const char *file, const int line)
     if (err)
         error_exit(err, __func__);
     qemu_mutex_post_lock(mutex, file, line);
+#ifdef CONFIG_DEBUG_MUTEX
+    pthread_getname_np(mutex->owner.thread, mutex->thread_name_buf,
+                       sizeof(mutex->thread_name_buf));
+    mutex->thread_name = mutex->thread_name_buf;
+#endif // CONFIG_DEBUG_MUTEX
 }
 
 int qemu_mutex_trylock_impl(QemuMutex *mutex, const char *file, const int line)
@@ -105,6 +114,11 @@ int qemu_mutex_trylock_impl(QemuMutex *mutex, const char *file, const int line)
     err = pthread_mutex_trylock(&mutex->lock);
     if (err == 0) {
         qemu_mutex_post_lock(mutex, file, line);
+#ifdef CONFIG_DEBUG_MUTEX
+        pthread_getname_np(mutex->owner.thread, mutex->thread_name_buf,
+                           sizeof(mutex->thread_name_buf));
+        mutex->thread_name = mutex->thread_name_buf;
+#endif // CONFIG_DEBUG_MUTEX
         return 0;
     }
     if (err != EBUSY) {
@@ -119,6 +133,10 @@ void qemu_mutex_unlock_impl(QemuMutex *mutex, const char *file, const int line)
 
     assert(mutex->initialized);
     qemu_mutex_pre_unlock(mutex, file, line);
+#ifdef CONFIG_DEBUG_MUTEX
+    mutex->thread_name = NULL;
+#endif
+
     err = pthread_mutex_unlock(&mutex->lock);
     if (err)
         error_exit(err, __func__);
@@ -222,8 +240,17 @@ void qemu_cond_wait_impl(QemuCond *cond, QemuMutex *mutex, const char *file, con
 
     assert(cond->initialized);
     qemu_mutex_pre_unlock(mutex, file, line);
+#ifdef CONFIG_DEBUG_MUTEX
+    mutex->thread_name = NULL;
+#endif
+
     err = pthread_cond_wait(&cond->cond, &mutex->lock);
     qemu_mutex_post_lock(mutex, file, line);
+#ifdef CONFIG_DEBUG_MUTEX
+    pthread_getname_np(mutex->owner.thread, mutex->thread_name_buf,
+                       sizeof(mutex->thread_name_buf));
+    mutex->thread_name = mutex->thread_name_buf;
+#endif // CONFIG_DEBUG_MUTEX
     if (err)
         error_exit(err, __func__);
 }
