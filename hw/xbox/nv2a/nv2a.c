@@ -20,6 +20,7 @@
  */
 
 #include "hw/xbox/nv2a/nv2a_int.h"
+#include "hw/xbox/smbus.h"
 #include "qemu/main-loop.h"
 
 void nv2a_update_irq(NV2AState *d)
@@ -43,6 +44,13 @@ void nv2a_update_irq(NV2AState *d)
         d->pmc.pending_interrupts |= NV_PMC_INTR_0_PGRAPH;
     } else {
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PGRAPH;
+    }
+
+    /* PTIMER */
+    if (d->ptimer.pending_interrupts & d->ptimer.enabled_interrupts) {
+        d->pmc.pending_interrupts |= NV_PMC_INTR_0_PTIMER;
+    } else {
+        d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PTIMER;
     }
 
     if (d->pmc.pending_interrupts && d->pmc.enabled_interrupts) {
@@ -198,8 +206,13 @@ static void nv2a_vga_gfx_update(void *opaque)
     VGACommonState *vga = opaque;
     vga->hw_ops->gfx_update(vga);
 
+
     NV2AState *d = container_of(vga, NV2AState, vga);
-    d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
+    if (!(d->pcrtc.pending_interrupts & NV_PCRTC_INTR_0_VBLANK)) {
+        smbus_cx25871_notify_vblank();
+        d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
+    }
+
     d->pcrtc.raster = 0;
 
     nv2a_update_irq(d);
@@ -320,6 +333,7 @@ static void nv2a_reset(NV2AState *d)
     d->pmc.pending_interrupts = 0;
     d->pfifo.pending_interrupts = 0;
     d->ptimer.pending_interrupts = 0;
+    ptimer_reset(d);
     d->pcrtc.pending_interrupts = 0;
 
     for (int i = 0; i < 256; i++) {
@@ -444,7 +458,7 @@ const VMStateDescription vmstate_nv2a_pgraph_vertex_attributes = {
 
 static const VMStateDescription vmstate_nv2a = {
     .name = "nv2a",
-    .version_id = 3,
+    .version_id = 4,
     .minimum_version_id = 1,
     .post_save = nv2a_post_save,
     .post_load = nv2a_post_load,
@@ -564,6 +578,8 @@ static const VMStateDescription vmstate_nv2a = {
         VMSTATE_BOOL(pgraph.waiting_for_nop, NV2AState),
         VMSTATE_UNUSED(1),
         VMSTATE_BOOL(pgraph.waiting_for_context_switch, NV2AState),
+        VMSTATE_UINT32(ptimer.alarm_time_high, NV2AState),
+        VMSTATE_UINT64(ptimer.time_offset, NV2AState),
         VMSTATE_END_OF_LIST()
     },
 };
@@ -615,5 +631,6 @@ void nv2a_init(PCIBus *bus, int devfn, MemoryRegion *ram)
     NV2AState *d = NV2A_DEVICE(dev);
     nv2a_init_memory(d, ram);
     nv2a_init_vga(d);
+    ptimer_init(d);
     qemu_add_vm_change_state_handler(nv2a_vm_state_change, d);
 }
