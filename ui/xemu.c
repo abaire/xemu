@@ -61,7 +61,11 @@
 #include <SDL3/SDL.h>
 
 #ifndef DEBUG_XEMU_C
+// DONOTSUBMIT
 #define DEBUG_XEMU_C 1
+#define DELAY_EVENT_LOOP 1
+#else
+#define DELAY_EVENT_LOOP 0
 #endif
 
 #if DEBUG_XEMU_C
@@ -812,6 +816,7 @@ static void *vblank_timer_thread(void *opaque)
 }
 
 #if DEBUG_XEMU_C
+static uint64_t event_loops_since_update = 0;
 static uint64_t last_forced_delay = 0;
 static uint64_t cumulative_delay = 0;
 static void report_stats(void)
@@ -825,6 +830,7 @@ static void report_stats(void)
         DPRINTF("[[ ");
         DPRINTF("vblank @%fHz avg, %d frames / %llu ms = %f", fps, num_frames, delta_ms, (double)num_frames / ((double)(delta_ms) / 1000.0));
         DPRINTF(" - last delay %llu, cumulative %llu", last_forced_delay, cumulative_delay);
+        DPRINTF(" - loops %llu", event_loops_since_update);
         DPRINTF(" - bql %"PRId64"ns/iter, %g%% time avg", lock_held_acc/num_frames, (double)lock_held_acc/(double)(delta_ms * 10000.0));
         DPRINTF(" ]]\n");
 
@@ -833,6 +839,7 @@ static void report_stats(void)
         num_frames = 0;
         last_forced_delay = 0;
         cumulative_delay = 0;
+        event_loops_since_update = 0;
     }
 }
 #endif
@@ -1415,26 +1422,31 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
-//#ifndef DEBUG_XEMU_C
+#if DELAY_EVENT_LOOP
     static int64_t last_update = 0;
-//#endif
+#endif
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
         gl_render_frame(scon);
 
-//#ifndef DEBUG_XEMU_C
+#if DELAY_EVENT_LOOP
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         /* Throttle to 60Hz */
         int64_t deadline = last_update + 16666666;
-        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         if (now < deadline) {
-#ifdef DEBUG_XEMU_C
+#if DEBUG_XEMU_C
             last_forced_delay = deadline - now;
             cumulative_delay += last_forced_delay;
 #endif
             SDL_DelayPrecise(deadline - now);
         }
         last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-//#endif
+#endif  // #if DELAY_EVENT_LOOP
+
+#if DEBUG_XEMU_C
+    ++event_loops_since_update;
+#endif
+
     }
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
