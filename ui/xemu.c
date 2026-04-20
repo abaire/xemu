@@ -1138,6 +1138,7 @@ static void display_early_init(DisplayOptions *o)
 
     SDL_GL_MakeCurrent(m_window, m_context);
     int interval = g_config.display.window.vsync ? 1 : 0;
+    fprintf(stderr, "VSYNC setting %s\n", interval ? "ON" : "OFF");
     if (!SDL_GL_SetSwapInterval(interval)) {
         fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
                 SDL_GetError());
