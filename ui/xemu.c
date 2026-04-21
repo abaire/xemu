@@ -67,6 +67,7 @@
 
 // DONOTSUBMIT
 #define DELAY_EVENT_LOOP 0
+#define YIELD_EVENT_LOOP 1
 
 #if DEBUG_XEMU_C
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
@@ -1149,6 +1150,9 @@ static void display_early_init(DisplayOptions *o)
 #if DELAY_EVENT_LOOP
     fprintf(stderr, "Will force delay in event loop\n");
 #endif
+#if YIELD_EVENT_LOOP
+    fprintf(stderr, "Will yield in event loop\n");
+#endif
     if (!interval) {
         SDL_GL_SetSwapInterval(0);
     } else if (SDL_GL_SetSwapInterval(-1)) {
@@ -1449,6 +1453,10 @@ int main(int argc, char **argv)
         }
         last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 #endif  // #if DELAY_EVENT_LOOP
+
+#if YIELD_EVENT_LOOP
+        SDL_Delay(0);;
+#endif
 
 #if DEBUG_XEMU_C
     ++event_loops_since_update;
