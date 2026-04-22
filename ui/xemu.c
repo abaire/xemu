@@ -62,12 +62,13 @@
 
 #ifndef DEBUG_XEMU_C
 // DONOTSUBMIT
-#define DEBUG_XEMU_C 1
+#define DEBUG_XEMU_C 0
 #endif
 
 // DONOTSUBMIT
 #define DELAY_EVENT_LOOP 0
-#define YIELD_EVENT_LOOP 1
+#define YIELD_EVENT_LOOP 0
+#define THROTTLE_EVENT_POLLER 1
 
 #if DEBUG_XEMU_C
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
@@ -1153,6 +1154,9 @@ static void display_early_init(DisplayOptions *o)
 #if YIELD_EVENT_LOOP
     fprintf(stderr, "Will yield in event loop\n");
 #endif
+#if THROTTLE_EVENT_POLLER
+    fprintf(stderr, "Will throttle event polling\n");
+#endif
     if (!interval) {
         SDL_GL_SetSwapInterval(0);
     } else if (SDL_GL_SetSwapInterval(-1)) {
@@ -1434,16 +1438,35 @@ int main(int argc, char **argv)
 
     struct xemu_console *scon = &scon_list[0];
 #if DELAY_EVENT_LOOP
-    static int64_t last_update = 0;
+    static int64_t last_frame_render = 0;
 #endif
+#if THROTTLE_EVENT_POLLER
+    static const int64_t kPollInterval = 16666666;
+    static int64_t next_poll = 0;
+#endif
+
     while (!qatomic_read(&qemu_exiting)) {
+
+
+#if DELAY_EVENT_LOOP || THROTTLE_EVENT_POLLER
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+#endif
+      
+#if THROTTLE_EVENT_POLLER
+        if (now >= next_poll) {
+#endif
         poll_events(scon);
+#if THROTTLE_EVENT_POLLER
+        next_poll = now + kPollInterval;
+      }
+#endif
+        
         gl_render_frame(scon);
 
 #if DELAY_EVENT_LOOP
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         /* Throttle to 60Hz */
-        int64_t deadline = last_update + 16666666;
+        int64_t deadline = last_frame_render + 16666666;
         if (now < deadline) {
 #if DEBUG_XEMU_C
             last_forced_delay = deadline - now;
@@ -1451,11 +1474,11 @@ int main(int argc, char **argv)
 #endif
             SDL_DelayPrecise(deadline - now);
         }
-        last_update = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        last_frame_render = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 #endif  // #if DELAY_EVENT_LOOP
 
 #if YIELD_EVENT_LOOP
-        SDL_Delay(0);;
+        SDL_Delay(0);
 #endif
 
 #if DEBUG_XEMU_C
