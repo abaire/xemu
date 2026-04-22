@@ -851,7 +851,11 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    glFinish();
+    if (g_debug_hackery_settings.flush_instead_of_finish) {
+        glFlush();
+    } else {
+        glFinish();
+    }
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
@@ -1097,6 +1101,7 @@ static void display_early_init(DisplayOptions *o)
     SDL_GL_MakeCurrent(m_window, m_context);
     int interval = g_config.display.window.vsync ? 1 : 0;
     fprintf(stderr, "VSYNC setting %s\n", interval ? "ON" : "OFF");
+
     if (!interval) {
         SDL_GL_SetSwapInterval(0);
     } else if (SDL_GL_SetSwapInterval(-1)) {
@@ -1377,9 +1382,44 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
+    static int64_t next_frame = 0;
+    static int64_t next_poll = 0;
     while (!qatomic_read(&qemu_exiting)) {
-        poll_events(scon);
-        gl_render_frame(scon);
+        int64_t now = 0;
+        if (g_debug_hackery_settings.render_frequency_ns > 0 ||
+            g_debug_hackery_settings.poll_frequency_ns > 0) {
+            now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        }
+
+        if (!g_debug_hackery_settings.poll_frequency_ns || now >= next_poll) {
+            poll_events(scon);
+            next_poll = now + g_debug_hackery_settings.poll_frequency_ns;
+        }
+
+        if (!g_debug_hackery_settings.render_frequency_ns ||
+            now >= next_frame) {
+            gl_render_frame(scon);
+            next_frame = now + g_debug_hackery_settings.render_frequency_ns;
+        }
+
+        if (g_debug_hackery_settings.render_frequency_ns > 0 &&
+            g_debug_hackery_settings.poll_frequency_ns > 0) {
+            int64_t deadline = MIN(next_poll, next_frame);
+            if (now < deadline) {
+#if DEBUG_XEMU_C
+                last_forced_delay = deadline - now;
+                cumulative_delay += last_forced_delay;
+#endif
+                SDL_DelayPrecise(deadline - now);
+            }
+        } else if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
+            SDL_Delay(
+                g_debug_hackery_settings.yield_in_event_loop_milliseconds);
+        }
+
+#if DEBUG_XEMU_C
+        ++event_loops_since_update;
+#endif
     }
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);

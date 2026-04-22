@@ -30,6 +30,18 @@
 extern "C" {
 #endif
 
+typedef struct DebugHackerySettings {
+    int target_poll_fps;
+    int target_render_fps;
+    int yield_in_event_loop_milliseconds;
+    bool flush_instead_of_finish;
+
+    int64_t poll_frequency_ns;
+    int64_t render_frequency_ns;
+} DebugHackerySettings;
+
+extern DebugHackerySettings g_debug_hackery_settings;
+
 // Implemented in xemu.c
 int xemu_is_fullscreen(void);
 void xemu_toggle_fullscreen(void);
