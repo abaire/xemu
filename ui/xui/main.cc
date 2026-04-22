@@ -65,6 +65,12 @@ static int g_vsync;
 static GLuint g_tex;
 static bool g_flip_req;
 
+DebugHackerySettings g_debug_hackery_settings = {
+    .target_poll_fps = 0,
+    .target_render_fps = 0,
+    .yield_in_event_loop_milliseconds = 0,
+    .flush_instead_of_finish = false,
+};
 
 static void InitializeStyle()
 {
@@ -395,9 +401,125 @@ static void host_vsync_test()
     ImGui::End();
 }
 
+static void apply_debug_settings(DebugHackerySettings &new_state)
+{
+    static constexpr int64_t kOneSecondNanos = 1000000000;
+    g_debug_hackery_settings = new_state;
+
+    g_debug_hackery_settings.poll_frequency_ns =
+        new_state.target_poll_fps ?
+            kOneSecondNanos / static_cast<int64_t>(new_state.target_poll_fps) :
+            0;
+    g_debug_hackery_settings.render_frequency_ns =
+        new_state.target_render_fps ?
+            kOneSecondNanos /
+                static_cast<int64_t>(new_state.target_render_fps) :
+            0;
+}
+
+static void debug_hackery_overlay(void)
+{
+    static DebugHackerySettings local_state;
+    static bool initialized = false;
+
+    if (!initialized) {
+        local_state = g_debug_hackery_settings;
+        initialized = true;
+    }
+
+    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImVec2 pos(viewport->WorkPos.x + 10.0f,
+               viewport->WorkPos.y + viewport->WorkSize.y - 10.0f);
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+
+    if (ImGui::Begin("Debug Hackery", NULL, flags)) {
+        ImGui::Text("Debug Hackery");
+        ImGui::Separator();
+
+        if (ImGui::BeginTable("##hackery_table", 2)) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Poll FPS");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt("##Poll FPS", &local_state.target_poll_fps,
+                                0)) {
+                if (local_state.target_poll_fps > 600)
+                    local_state.target_poll_fps = 600;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Render FPS");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt("##Render FPS", &local_state.target_render_fps,
+                                0)) {
+                if (local_state.target_render_fps > 600)
+                    local_state.target_render_fps = 600;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Yield ms");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt("##Yield ms",
+                                &local_state.yield_in_event_loop_milliseconds,
+                                0)) {
+                if (local_state.yield_in_event_loop_milliseconds > 66)
+                    local_state.yield_in_event_loop_milliseconds = 66;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("glFlush instead of glFinish");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##glFlush instead of glFinish",
+                            &local_state.flush_instead_of_finish);
+
+            ImGui::EndTable();
+        }
+
+        bool is_modified =
+            (local_state.target_poll_fps !=
+             g_debug_hackery_settings.target_poll_fps) ||
+            (local_state.target_render_fps !=
+             g_debug_hackery_settings.target_render_fps) ||
+            (local_state.yield_in_event_loop_milliseconds !=
+             g_debug_hackery_settings.yield_in_event_loop_milliseconds) ||
+            (local_state.flush_instead_of_finish !=
+             g_debug_hackery_settings.flush_instead_of_finish);
+
+        ImGui::BeginDisabled(!is_modified);
+
+        if (ImGui::Button("Apply")) {
+            apply_debug_settings(local_state);
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            local_state = g_debug_hackery_settings;
+        }
+
+        ImGui::EndDisabled();
+    }
+    ImGui::End();
+}
+
 void xemu_hud_render()
 {
     host_vsync_test();
+    debug_hackery_overlay();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
