@@ -322,24 +322,32 @@ void xemu_hud_update(void)
     // if (show_demo) ImGui::ShowDemoWindow(&show_demo);
 }
 
-static void host_vsync_test() {
+static void host_vsync_test()
+{
     const float PAD = 20.0f;
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float FLICKER_RECT_W = 8.f;
+    const float FLICKER_RECT_H = 16.f;
+    const float TRACK_OFFSET_Y = FLICKER_RECT_H + 4;
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImVec2 work_pos = viewport->WorkPos;
     ImVec2 work_size = viewport->WorkSize;
 
     // Pin window to the bottom right corner
-    ImVec2 window_pos(work_pos.x + work_size.x - PAD, work_pos.y + work_size.y - PAD);
+    ImVec2 window_pos(work_pos.x + work_size.x - PAD,
+                      work_pos.y + work_size.y - PAD - TRACK_OFFSET_Y);
     ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.8f);
 
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                             ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoInputs;
 
     if (ImGui::Begin("HostVsyncTest", nullptr, flags)) {
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        ImDrawList *draw_list = ImGui::GetWindowDrawList();
         ImVec2 p = ImGui::GetCursorScreenPos();
+        p.y += TRACK_OFFSET_Y;
 
         const int steps = 60;
         const float block_w = 4.0f;
@@ -351,20 +359,38 @@ static void host_vsync_test() {
         int idx_60 = (int)(t * 60.0) % steps;
         int idx_30 = (int)(t * 30.0) % (steps / 2);
 
-        // Draw track backgrounds
-        draw_list->AddRectFilled(p, ImVec2(p.x + track_w, p.y + block_h), IM_COL32(50, 50, 50, 255));
-        draw_list->AddRectFilled(ImVec2(p.x, p.y + block_h + spacing), ImVec2(p.x + track_w, p.y + block_h * 2 + spacing), IM_COL32(50, 50, 50, 255));
+        draw_list->AddRectFilled(p, ImVec2(p.x + track_w, p.y + block_h),
+                                 IM_COL32(50, 50, 50, 255));
+        draw_list->AddRectFilled(
+            ImVec2(p.x, p.y + block_h + spacing),
+            ImVec2(p.x + track_w, p.y + block_h * 2 + spacing),
+            IM_COL32(50, 50, 50, 255));
 
-        // 60 Hz Block (Red)
         ImVec2 p60(p.x + (idx_60 * block_w), p.y);
-        draw_list->AddRectFilled(p60, ImVec2(p60.x + block_w, p60.y + block_h), IM_COL32(255, 0, 0, 255));
+        draw_list->AddRectFilled(p60, ImVec2(p60.x + block_w, p60.y + block_h),
+                                 IM_COL32(255, 0, 0, 255));
 
-        // 30 Hz Block (Green)
         ImVec2 p30(p.x + (idx_30 * block_w * 2.0f), p.y + block_h + spacing);
-        draw_list->AddRectFilled(p30, ImVec2(p30.x + block_w * 2.0f, p30.y + block_h), IM_COL32(0, 255, 0, 255));
+        draw_list->AddRectFilled(
+            p30, ImVec2(p30.x + block_w * 2.0f, p30.y + block_h),
+            IM_COL32(0, 255, 0, 255));
 
-        // Reserve space to ensure the window encapsulates the manually drawn primitives
-        ImGui::Dummy(ImVec2(track_w, (block_h * 2) + spacing));
+        ImVec2 flicker_fusion(p.x + track_w - FLICKER_RECT_W * 2.f,
+                              p.y - TRACK_OFFSET_Y);
+        draw_list->AddRectFilled(flicker_fusion,
+                                 ImVec2(flicker_fusion.x + FLICKER_RECT_W,
+                                        flicker_fusion.y + FLICKER_RECT_H),
+                                 IM_COL32(0xBA, 0xBA, 0, 0xFF));
+        draw_list->AddRectFilled(
+            ImVec2(flicker_fusion.x + FLICKER_RECT_W, flicker_fusion.y),
+            ImVec2(flicker_fusion.x + FLICKER_RECT_W * 2.f,
+                   flicker_fusion.y + FLICKER_RECT_H),
+            (idx_60 & 0x01) ? IM_COL32(0xFF, 0, 0, 0xFF) :
+                              IM_COL32(0, 0xFF, 0, 0xFF));
+
+        // Reserve space to ensure the window encapsulates the manually drawn
+        // primitives
+        ImGui::Dummy(ImVec2(track_w, (block_h * 2) + spacing + TRACK_OFFSET_Y));
     }
     ImGui::End();
 }
