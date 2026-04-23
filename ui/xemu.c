@@ -847,6 +847,7 @@ static void report_stats(void)
  */
 static void gl_render_frame(struct xemu_console *scon)
 {
+    static GLsync frame_sync = NULL;
     static bool rendering;
     if (qatomic_xchg(&rendering, true) || qatomic_read(&qemu_exiting)) {
         fprintf(stderr, "WARNING: gl_render_frame called while rendering\n");
@@ -897,10 +898,17 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    if (g_debug_hackery_settings.flush_instead_of_finish) {
-        glFlush();
-    } else {
-        glFinish();
+
+    if (frame_sync) {
+        glClientWaitSync(frame_sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
+        glDeleteSync(frame_sync);
+        frame_sync = NULL;
+    } else if (!g_debug_hackery_settings.fence_sync) {
+        if (g_debug_hackery_settings.flush_instead_of_finish) {
+            glFlush();
+        } else {
+            glFinish();
+        }
     }
 
     if (release_surface_texture) {
@@ -912,6 +920,10 @@ static void gl_render_frame(struct xemu_console *scon)
     nv2a_release_framebuffer_surface();
     SDL_GL_SwapWindow(scon->real_window);
     assert(glGetError() == GL_NO_ERROR);
+
+    if (g_debug_hackery_settings.fence_sync) {
+        frame_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
 
     qatomic_set(&rendering, false);
 

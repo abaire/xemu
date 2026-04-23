@@ -35,6 +35,7 @@ typedef struct DebugHackerySettings {
     int target_render_fps;
     int yield_in_event_loop_milliseconds;
     bool flush_instead_of_finish;
+    bool fence_sync;
 
     int64_t poll_frequency_ns;
     int64_t render_frequency_ns;
