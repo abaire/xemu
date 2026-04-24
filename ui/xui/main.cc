@@ -458,10 +458,10 @@ static void debug_hackery_overlay(void)
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::Text("Render FPS");
+            ImGui::Text("UI Render FPS");
             ImGui::TableNextColumn();
             ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##Render FPS", &local_state.target_render_fps,
+            if (ImGui::InputInt("##UI Render FPS", &local_state.target_render_fps,
                                 0)) {
                 if (local_state.target_render_fps > 600)
                     local_state.target_render_fps = 600;
@@ -526,8 +526,24 @@ static void debug_hackery_overlay(void)
     ImGui::End();
 }
 
+static void fps_overlay()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiWindowFlags fps_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+    if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
+        ImGui::Text("UI FPS: %.1f", io.Framerate);
+        ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
+    }
+    ImGui::End();
+}
+
 void xemu_hud_render()
 {
+    fps_overlay();
     host_vsync_test();
     debug_hackery_overlay();
     ImGui::Render();
