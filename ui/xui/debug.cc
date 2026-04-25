@@ -490,19 +490,41 @@ void DebugVideoWindow::Draw()
     ImGui::PopStyleColor(5);
 }
 
+// Custom axis scale: log10(1 + x). Maps 0 -> 0 instead of 0 -> -inf so that
+// counters that are zero for a frame draw a line to the bottom of the graph
+// rather than creating a gap that looks like missing data.
+static double AdvPlotForward(double v, void *)
+{
+    return std::log10(1.0 + std::max(0.0, v));
+}
+
+static double AdvPlotInverse(double v, void *)
+{
+    return std::pow(10.0, v) - 1.0;
+}
+
+static int AdvPlotFormatter(double value, char *buf, int size, void *)
+{
+    if (value < 0.5) {
+        return snprintf(buf, size, "0");
+    }
+    return snprintf(buf, size, "%.4g", value);
+}
+
 int DebugVideoWindow::FindHoveredPlotLineIndex()
 {
     ImPlotPoint mouse_pos = ImPlot::GetPlotMousePos();
     int x_idx = std::round(mouse_pos.x);
 
-    if (x_idx < 0 || x_idx >= NV2A_PROF_NUM_FRAMES || mouse_pos.y <= 0) {
+    if (x_idx < 0 || x_idx >= NV2A_PROF_NUM_FRAMES || mouse_pos.y < 0) {
         return -1;
     }
 
     int data_idx = (g_nv2a_stats.frame_ptr + x_idx) % NV2A_PROF_NUM_FRAMES;
     float best_dist = 0.1f;
     int best_item = -1;
-    float log_mouse_y = std::log10(mouse_pos.y);
+    // Use the same log1p metric as the plot so hover distances are consistent.
+    float log_mouse_y = std::log10(1.0f + std::max(0.0f, (float)mouse_pos.y));
 
     for (int i = 0; i < NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS; ++i) {
         if (!m_counter_visible[i]) {
@@ -516,11 +538,11 @@ int DebugVideoWindow::FindHoveredPlotLineIndex()
             val = g_nv2a_stats.frame_history[data_idx].mspf;
         }
 
-        if (val <= 0) {
+        if (val < 0) {
             continue;
         }
 
-        float dist = std::fabs(std::log10(val) - log_mouse_y);
+        float dist = std::fabs(std::log10(1.0f + val) - log_mouse_y);
         if (dist < best_dist) {
             best_dist = dist;
             best_item = i;
@@ -677,7 +699,10 @@ void DebugVideoWindow::DrawAdvancedContent()
                               ImPlotFlags_NoLegend)) {
             ImPlot::SetupAxes(NULL, NULL, ImPlotAxisFlags_None,
                               ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+            // log10(1+x) scale: zero maps to 0 rather than -inf, so counters
+            // that hit zero draw to the bottom instead of leaving a gap.
+            ImPlot::SetupAxisScale(ImAxis_Y1, AdvPlotForward, AdvPlotInverse);
+            ImPlot::SetupAxisFormat(ImAxis_Y1, AdvPlotFormatter);
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, NV2A_PROF_NUM_FRAMES);
 
             if (ImPlot::IsPlotHovered()) {
