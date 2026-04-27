@@ -1210,8 +1210,22 @@ const enum NV2A_PROF_COUNTERS_ENUM finish_reason_to_counter_enum[] = {
     [VK_FINISH_REASON_STALLED] = NV2A_PROF_FINISH_STALLED,
 };
 
+const enum NV2A_PROF_ACCUMULATORS_ENUM finish_reason_to_accumulator_enum[] = {
+    [VK_FINISH_REASON_VERTEX_BUFFER_DIRTY] = NV2A_PROF_VK_FINISH_VERTEX_BUFFER_DIRTY,
+    [VK_FINISH_REASON_SURFACE_CREATE] = NV2A_PROF_VK_FINISH_SURFACE_CREATE,
+    [VK_FINISH_REASON_SURFACE_DOWN] = NV2A_PROF_VK_FINISH_SURFACE_DOWN,
+    [VK_FINISH_REASON_NEED_BUFFER_SPACE] = NV2A_PROF_VK_FINISH_NEED_BUFFER_SPACE,
+    [VK_FINISH_REASON_FRAMEBUFFER_DIRTY] = NV2A_PROF_VK_FINISH_FRAMEBUFFER_DIRTY,
+    [VK_FINISH_REASON_PRESENTING] = NV2A_PROF_VK_FINISH_PRESENTING,
+    [VK_FINISH_REASON_FLIP_STALL] = NV2A_PROF_VK_FINISH_FLIP_STALL,
+    [VK_FINISH_REASON_FLUSH] = NV2A_PROF_VK_FINISH_FLUSH,
+    [VK_FINISH_REASON_STALLED] = NV2A_PROF_VK_FINISH_STALLED,
+};
+
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 {
+    int64_t finish_start = nv2a_profile_duration_start();
+
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     assert(!r->in_draw);
@@ -1278,7 +1292,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         }
 
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
-                                 VK_TRUE, UINT64_MAX));
+                                    VK_TRUE, UINT64_MAX));
 
         r->descriptor_set_index = 0;
         r->in_command_buffer = false;
@@ -1293,6 +1307,8 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
     pgraph_vk_process_pending_reports_internal(d);
 
     pgraph_vk_compute_finish_complete(r);
+
+    nv2a_profile_accumulate_duration_us(finish_reason_to_accumulator_enum[finish_reason], finish_start);
 }
 
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
@@ -2020,6 +2036,7 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
 
 void pgraph_vk_flush_draw(NV2AState *d)
 {
+    int64_t start = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -2191,4 +2208,5 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_FLUSH, start);
 }

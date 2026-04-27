@@ -355,6 +355,7 @@ DebugVideoWindow::DebugVideoWindow()
     m_prev_scale = g_viewport_mgr.m_scale;
 
     m_hovered_counter_index = -1;
+    m_hovered_accumulator_index = -1;
     m_legend_sort_mode = LegendSortMode::DEFAULT;
 
     m_legend_names.reserve(NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS);
@@ -374,6 +375,10 @@ DebugVideoWindow::DebugVideoWindow()
     std::sort(m_legend_indices_sorted_az.begin(), m_legend_indices_sorted_az.end(), [&](size_t a, size_t b) {
         return g_ascii_strcasecmp(m_legend_names[a], m_legend_names[b]) < 0;
     });
+
+    for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT + 1; ++i) {
+        m_timing_visible[i] = true;
+    }
 }
 
 static int LastFrameHistoryIndex()
@@ -458,6 +463,17 @@ void DebugVideoWindow::Draw()
         }
         ImPlot::PopStyleColor();
 
+        ImGui::SetNextItemOpen(g_config.display.debug.video.timing_tree_state,
+                       ImGuiCond_Once);
+        g_config.display.debug.video.timing_tree_state =
+            ImGui::TreeNode("Frame Timing Breakdown");
+
+        if (g_config.display.debug.video.timing_tree_state) {
+            ImGui::SetNextWindowBgAlpha(alpha);
+            DrawFrameTimingBreakdownContent();
+            ImGui::TreePop();
+        }
+
         ImGui::SetNextItemOpen(g_config.display.debug.video.advanced_tree_state,
                                ImGuiCond_Once);
         g_config.display.debug.video.advanced_tree_state =
@@ -489,7 +505,6 @@ void DebugVideoWindow::Draw()
     ImGui::End();
     ImGui::PopStyleColor(5);
 }
-
 // Custom axis scale: log10(1 + x). Maps 0 -> 0 instead of 0 -> -inf so that
 // counters that are zero for a frame draw a line to the bottom of the graph
 // rather than creating a gap that looks like missing data.
@@ -510,6 +525,8 @@ static int AdvPlotFormatter(double value, char *buf, int size, void *)
     }
     return snprintf(buf, size, "%.4g", value);
 }
+
+
 
 int DebugVideoWindow::FindHoveredPlotLineIndex()
 {
@@ -550,6 +567,44 @@ int DebugVideoWindow::FindHoveredPlotLineIndex()
     }
 
     return best_item;
+}
+
+int DebugVideoWindow::FindHoveredAccumulatorIndex()
+{
+    ImPlotPoint mouse_pos = ImPlot::GetPlotMousePos();
+    int x_idx = std::round(mouse_pos.x);
+
+    if (x_idx < 0 || x_idx >= NV2A_PROF_NUM_FRAMES || mouse_pos.y < 0) {
+        return -1;
+    }
+
+    int data_idx = (g_nv2a_stats.frame_ptr + x_idx) % NV2A_PROF_NUM_FRAMES;
+    const auto &frame = g_nv2a_stats.frame_history[data_idx];
+
+    // Check MSPF line first
+    float mspf_us = frame.mspf * 1000.0f;
+    float dist = std::fabs(mspf_us - mouse_pos.y);
+    // Use a similar threshold logic as FindHoveredPlotLineIndex, but since
+    // this is linear, we'll use a fixed value or a relative one.
+    // 1000us (1ms) seems like a reasonable hover threshold for a 33ms plot.
+    if (m_timing_visible[INDEX_TIMING_MSPF] && dist < 1000.0f) {
+        return INDEX_TIMING_MSPF;
+    }
+
+    // Check stacks
+    double current_sum = 0;
+    for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+        if (!m_timing_visible[i]) {
+            continue;
+        }
+        double next_sum = current_sum + frame.accumulators[i].total;
+        if (mouse_pos.y >= current_sum && mouse_pos.y < next_sum) {
+            return i;
+        }
+        current_sum = next_sum;
+    }
+
+    return -1;
 }
 
 void DebugVideoWindow::DrawAdvancedContent()
@@ -745,6 +800,193 @@ void DebugVideoWindow::DrawAdvancedContent()
     }
 
     m_hovered_counter_index = new_hovered_counter_index;
+}
+
+void DebugVideoWindow::DrawFrameTimingBreakdownContent()
+{
+    int new_hovered_accumulator_index = -1;
+    if (ImGui::BeginTable("##FrameTimingBreakdownTable", 2,
+                          ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Legend", ImGuiTableColumnFlags_WidthFixed,
+                                250 * g_viewport_mgr.m_scale);
+        ImGui::TableSetupColumn("Plot", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+
+        // Legend
+        int last_frame_idx =
+            (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
+            NV2A_PROF_NUM_FRAMES;
+        const auto &last_frame = g_nv2a_stats.frame_history[last_frame_idx];
+
+        ImGui::BeginChild("##TimingLegend",
+                          ImVec2(0, 300 * g_viewport_mgr.m_scale), false,
+                          ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1, 1, 1, 0.1f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1, 1, 1, 0.2f));
+
+        auto DrawLegendItem = [&](int idx, const char *name, int total,
+                                  int events, bool is_mspf) {
+            bool enabled = m_timing_visible[idx];
+            bool hovered = (m_hovered_accumulator_index == idx);
+
+            ImVec4 text_col;
+            if (enabled) {
+                text_col = hovered ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) :
+                                     ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+            } else {
+                text_col = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+            }
+
+            ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+            float swatch_size = ImGui::GetTextLineHeight();
+            float spacing = ImGui::GetStyle().ItemSpacing.x;
+            ImVec2 p = ImGui::GetCursorScreenPos();
+
+            if (enabled) {
+                ImVec4 swatch_col = is_mspf ? ImVec4(1, 1, 1, 1) :
+                                              ImPlot::GetColormapColor(idx);
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    p, ImVec2(p.x + swatch_size, p.y + swatch_size),
+                    ImColor(swatch_col));
+            }
+
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + swatch_size +
+                                 spacing);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, text_col);
+            char buf[256];
+            if (is_mspf) {
+                snprintf(buf, sizeof(buf), "%s: %d ms###LgndT%d", name, total,
+                         idx);
+            } else {
+                snprintf(buf, sizeof(buf), "%s: %d : %d###LgndT%d", name, total,
+                         events, idx);
+            }
+
+            ImGui::Selectable(buf, &m_timing_visible[idx]);
+            if (ImGui::IsItemHovered()) {
+                new_hovered_accumulator_index = idx;
+            }
+
+            if (hovered && enabled) {
+                ImVec2 min = ImGui::GetItemRectMin();
+                ImVec2 max = ImGui::GetItemRectMax();
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2(min.x, max.y - 1), ImVec2(max.x, max.y - 1),
+                    ImGui::GetColorU32(ImGuiCol_TitleBgActive), 2.0f);
+            }
+
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
+        };
+
+        DrawLegendItem(INDEX_TIMING_MSPF, "MSPF", last_frame.mspf, 0, true);
+        for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+            const char *name = nv2a_profile_get_accumulator_name(
+                (NV2A_PROF_ACCUMULATORS_ENUM)i);
+            const auto &acc = last_frame.accumulators[i];
+            DrawLegendItem(i, name, acc.total, acc.events, false);
+        }
+
+        ImGui::PopStyleColor(3);
+        ImGui::EndChild();
+
+        ImGui::TableNextColumn();
+        // Plot
+        if (ImPlot::BeginPlot("##FrameTimingBreakdownPlot",
+                              ImVec2(-1, 300 * g_viewport_mgr.m_scale),
+                              ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend)) {
+            ImPlot::SetupAxes("Frames", "Microseconds", ImPlotAxisFlags_None,
+                              ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 33333.3, ImGuiCond_Always);
+
+            if (ImPlot::IsPlotHovered()) {
+                new_hovered_accumulator_index = FindHoveredAccumulatorIndex();
+            }
+
+            int effective_hover = (new_hovered_accumulator_index != -1) ?
+                                      new_hovered_accumulator_index :
+                                      m_hovered_accumulator_index;
+
+            struct PlotContext {
+                DebugVideoWindow *window;
+                int i;
+            };
+
+            for (int i = NV2A_PROF_ACCUMULATORS__COUNT - 1; i >= 0; --i) {
+                if (!m_timing_visible[i]) {
+                    continue;
+                }
+
+                static PlotContext ctx[NV2A_PROF_ACCUMULATORS__COUNT];
+                ctx[i] = { this, i };
+
+                const char *name = nv2a_profile_get_accumulator_name(
+                    (NV2A_PROF_ACCUMULATORS_ENUM)i);
+                float alpha = (effective_hover == i) ? 0.8f : 0.25f;
+                ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, alpha);
+                ImPlot::PushStyleColor(ImPlotCol_Fill,
+                                       ImPlot::GetColormapColor(i));
+                ImPlot::PlotShadedG(
+                    name,
+                    [](int idx, void *data) -> ImPlotPoint {
+                        PlotContext *c = (PlotContext *)data;
+                        int frame_idx = (g_nv2a_stats.frame_ptr + idx) %
+                                        NV2A_PROF_NUM_FRAMES;
+                        double sum = 0;
+                        for (int k = 0; k <= c->i; ++k) {
+                            if (c->window->m_timing_visible[k]) {
+                                sum += g_nv2a_stats.frame_history[frame_idx]
+                                           .accumulators[k]
+                                           .total;
+                            }
+                        }
+                        return ImPlotPoint(idx, sum);
+                    },
+                    &ctx[i],
+                    [](int idx, void *data) -> ImPlotPoint {
+                        PlotContext *c = (PlotContext *)data;
+                        int frame_idx = (g_nv2a_stats.frame_ptr + idx) %
+                                        NV2A_PROF_NUM_FRAMES;
+                        double sum = 0;
+                        for (int k = 0; k < c->i; ++k) {
+                            if (c->window->m_timing_visible[k]) {
+                                sum += g_nv2a_stats.frame_history[frame_idx]
+                                           .accumulators[k]
+                                           .total;
+                            }
+                        }
+                        return ImPlotPoint(idx, sum);
+                    },
+                    &ctx[i], NV2A_PROF_NUM_FRAMES);
+                ImPlot::PopStyleColor();
+                ImPlot::PopStyleVar();
+            }
+
+            if (m_timing_visible[INDEX_TIMING_MSPF]) {
+                float mspf_weight =
+                    (effective_hover == INDEX_TIMING_MSPF) ? 4.0f : 2.0f;
+                ImPlot::SetNextLineStyle(ImVec4(1, 1, 1, 1), mspf_weight);
+                ImPlot::PlotLineG(
+                    "MSPF",
+                    [](int idx, void *data) -> ImPlotPoint {
+                        int frame_idx = (g_nv2a_stats.frame_ptr + idx) %
+                                        NV2A_PROF_NUM_FRAMES;
+                        return ImPlotPoint(
+                            idx, g_nv2a_stats.frame_history[frame_idx].mspf *
+                                     1000.0);
+                    },
+                    nullptr, NV2A_PROF_NUM_FRAMES);
+            }
+
+            ImPlot::EndPlot();
+        }
+        ImGui::EndTable();
+    }
+    m_hovered_accumulator_index = new_hovered_accumulator_index;
 }
 
 DebugApuWindow apu_window;
