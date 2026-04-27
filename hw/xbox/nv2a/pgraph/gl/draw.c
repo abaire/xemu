@@ -26,6 +26,8 @@
 
 void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
 {
+    int64_t profile_start = nv2a_profile_duration_start();
+
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
@@ -127,12 +129,16 @@ void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
     if (r->zeta_binding) {
         r->zeta_binding->cleared = full_clear && write_zeta;
     }
-    
+
     pg->clearing = false;
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_CLEAR_SURFACE,
+                                        profile_start);
 }
 
 void pgraph_gl_draw_begin(NV2AState *d)
 {
+    int64_t profile_start = nv2a_profile_duration_start();
+
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
@@ -157,8 +163,15 @@ void pgraph_gl_draw_begin(NV2AState *d)
 
     assert(r->color_binding || r->zeta_binding);
 
+    int64_t bind_textures_start = nv2a_profile_duration_start();
     pgraph_gl_bind_textures(d);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__BIND_TEXTURES,
+                                        bind_textures_start);
+
+    int64_t bind_shaders_start = nv2a_profile_duration_start();
     pgraph_gl_bind_shaders(pg);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__BIND_SHADERS,
+                                        bind_shaders_start);
 
     glColorMask(mask_red, mask_green, mask_blue, mask_alpha);
     glDepthMask(!!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE));
@@ -328,57 +341,11 @@ void pgraph_gl_draw_begin(NV2AState *d)
             r->gl_zpass_pixel_count_query_count - 1] = gl_query;
         glBeginQuery(GL_SAMPLES_PASSED, gl_query);
     }
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN, profile_start);
 }
 
-void pgraph_gl_draw_end(NV2AState *d)
-{
-    PGRAPHState *pg = &d->pgraph;
-    PGRAPHGLState *r = pg->gl_renderer_state;
-
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
-    bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
-    bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
-    bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
-    bool mask_blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
-    bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
-    bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
-    bool stencil_test =
-        pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
-    bool is_nop_draw = !(color_write || depth_test || stencil_test);
-
-    if (is_nop_draw) {
-        // FIXME: Check PGRAPH register 0x880.
-        // HW uses bit 11 in 0x880 to enable or disable a color/zeta limit
-        // check that will raise an exception in the case that a draw should
-        // modify the color and/or zeta buffer but the target(s) are masked
-        // off. This check only seems to trigger during the fragment
-        // processing, it is legal to attempt a draw that is entirely
-        // clipped regardless of 0x880. See xemu#635 for context.
-        NV2A_GL_DGROUP_END();
-        return;
-    }
-
-    pgraph_gl_flush_draw(d);
-
-    /* End of visibility testing */
-    if (pg->zpass_pixel_count_enable) {
-        nv2a_profile_inc_counter(NV2A_PROF_QUERY);
-        glEndQuery(GL_SAMPLES_PASSED);
-    }
-
-    pg->draw_time++;
-    if (r->color_binding && pgraph_color_write_enabled(pg)) {
-        r->color_binding->draw_time = pg->draw_time;
-    }
-    if (r->zeta_binding && pgraph_zeta_write_enabled(pg)) {
-        r->zeta_binding->draw_time = pg->draw_time;
-    }
-
-    pgraph_gl_set_surface_dirty(pg, color_write, depth_test || stencil_test);
-    NV2A_GL_DGROUP_END();
-}
-
-void pgraph_gl_flush_draw(NV2AState *d)
+static void flush_draw(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
@@ -396,9 +363,9 @@ void pgraph_gl_flush_draw(NV2AState *d)
         assert(pg->inline_array_length == 0);
 
         pgraph_gl_bind_vertex_attributes(d, pg->draw_arrays_min_start,
-                                      pg->draw_arrays_max_count - 1,
-                                      false, 0,
-                                      pg->draw_arrays_max_count - 1);
+                                         pg->draw_arrays_max_count - 1,
+                                         false, 0,
+                                         pg->draw_arrays_max_count - 1);
         glMultiDrawArrays(r->shader_binding->gl_primitive_mode,
                           pg->draw_arrays_start,
                           pg->draw_arrays_count,
@@ -417,8 +384,8 @@ void pgraph_gl_flush_draw(NV2AState *d)
         }
 
         pgraph_gl_bind_vertex_attributes(
-                d, min_element, max_element, false, 0,
-                pg->inline_elements[pg->inline_elements_length - 1]);
+            d, min_element, max_element, false, 0,
+            pg->inline_elements[pg->inline_elements_length - 1]);
 
         VertexKey k;
         memset(&k, 0, sizeof(VertexKey));
@@ -487,4 +454,67 @@ void pgraph_gl_flush_draw(NV2AState *d)
         NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
+}
+
+void pgraph_gl_draw_end(NV2AState *d)
+{
+    int64_t draw_end_start = nv2a_profile_duration_start();
+
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
+    bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
+    bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
+    bool mask_blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
+    bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
+    bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
+    bool stencil_test =
+        pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+    bool is_nop_draw = !(color_write || depth_test || stencil_test);
+
+    if (is_nop_draw) {
+        // FIXME: Check PGRAPH register 0x880.
+        // HW uses bit 11 in 0x880 to enable or disable a color/zeta limit
+        // check that will raise an exception in the case that a draw should
+        // modify the color and/or zeta buffer but the target(s) are masked
+        // off. This check only seems to trigger during the fragment
+        // processing, it is legal to attempt a draw that is entirely
+        // clipped regardless of 0x880. See xemu#635 for context.
+        NV2A_GL_DGROUP_END();
+        return;
+    }
+
+    int64_t flush_start = nv2a_profile_duration_start();
+    flush_draw(d);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_END__FLUSH, flush_start);
+
+    /* End of visibility testing */
+    if (pg->zpass_pixel_count_enable) {
+        nv2a_profile_inc_counter(NV2A_PROF_QUERY);
+        glEndQuery(GL_SAMPLES_PASSED);
+    }
+
+    pg->draw_time++;
+    if (r->color_binding && pgraph_color_write_enabled(pg)) {
+        r->color_binding->draw_time = pg->draw_time;
+    }
+    if (r->zeta_binding && pgraph_zeta_write_enabled(pg)) {
+        r->zeta_binding->draw_time = pg->draw_time;
+    }
+
+    int64_t set_dirty_start = nv2a_profile_duration_start();
+    pgraph_gl_set_surface_dirty(pg, color_write, depth_test || stencil_test);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_END__SET_DIRTY, set_dirty_start);
+    NV2A_GL_DGROUP_END();
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_END, draw_end_start);
+}
+
+void pgraph_gl_flush_draw(NV2AState *d)
+{
+    int64_t flush_start = nv2a_profile_duration_start();
+    flush_draw(d);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_FLUSH, flush_start);
 }
