@@ -961,6 +961,7 @@ DEF_METHOD(NV097, SET_CONTEXT_DMA_SEMAPHORE)
 
 DEF_METHOD(NV097, SET_CONTEXT_DMA_REPORT)
 {
+    nv2a_profile_inc_counter(NV2A_PROF_SET_CONTEXT_DMA_REPORT);
     d->pgraph.renderer->ops.process_pending_reports(d);
 
     pg->dma_report = parameter;
@@ -3225,6 +3226,7 @@ void pgraph_process_pending(NV2AState *d)
 void pgraph_process_pending_reports(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    nv2a_profile_inc_counter(NV2A_PROF_PGRAPH_PROCESS_PENDING_REPORTS);
     pg->renderer->ops.process_pending_reports(d);
 }
 
