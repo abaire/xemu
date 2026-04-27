@@ -114,6 +114,8 @@
     _X(NV2A_PROF_QUEUE_SUBMIT_3) \
     _X(NV2A_PROF_QUEUE_SUBMIT_4) \
     _X(NV2A_PROF_QUEUE_SUBMIT_5) \
+    _X(NV2A_PROF_SET_CONTEXT_DMA_REPORT) \
+    _X(NV2A_PROF_PGRAPH_PROCESS_PENDING_REPORTS) \
 
 enum NV2A_PROF_COUNTERS_ENUM {
     #define _X(x) x,
@@ -122,7 +124,33 @@ enum NV2A_PROF_COUNTERS_ENUM {
     NV2A_PROF__COUNT
 };
 
+#define NV2A_PROF_ACCUMULATORS_XMAC \
+    _X(NV2A_PROF_VK_DRAW_FLUSH) \
+    _X(NV2A_PROF_VK_SURFACE_UPDATE) \
+    _X(NV2A_PROF_VK_FINISH_VERTEX_BUFFER_DIRTY) \
+    _X(NV2A_PROF_VK_FINISH_SURFACE_CREATE) \
+    _X(NV2A_PROF_VK_FINISH_SURFACE_DOWN) \
+    _X(NV2A_PROF_VK_FINISH_NEED_BUFFER_SPACE) \
+    _X(NV2A_PROF_VK_FINISH_FRAMEBUFFER_DIRTY) \
+    _X(NV2A_PROF_VK_FINISH_PRESENTING) \
+    _X(NV2A_PROF_VK_FINISH_FLIP_STALL) \
+    _X(NV2A_PROF_VK_FINISH_FLUSH) \
+    _X(NV2A_PROF_VK_FINISH_STALLED) \
+
+
+enum NV2A_PROF_ACCUMULATORS_ENUM {
+    #define _X(x) x,
+    NV2A_PROF_ACCUMULATORS_XMAC
+    #undef _X
+    NV2A_PROF_ACCUMULATORS__COUNT
+};
+
 #define NV2A_PROF_NUM_FRAMES 300
+
+typedef struct NV2AProfileAccumulator {
+    int events;
+    int total;
+} NV2AProfileAccumulator;
 
 typedef struct NV2AStats {
     int64_t last_flip_time;
@@ -131,6 +159,7 @@ typedef struct NV2AStats {
     struct {
         int mspf;
         int counters[NV2A_PROF__COUNT];
+        NV2AProfileAccumulator accumulators[NV2A_PROF_ACCUMULATORS__COUNT];
     } frame_working, frame_history[NV2A_PROF_NUM_FRAMES];
     unsigned int frame_ptr;
 } NV2AStats;
@@ -143,6 +172,11 @@ extern NV2AStats g_nv2a_stats;
 
 const char *nv2a_profile_get_counter_name(unsigned int cnt);
 int nv2a_profile_get_counter_value(unsigned int cnt);
+
+const char *nv2a_profile_get_accumulator_name(unsigned int acc);
+const NV2AProfileAccumulator *nv2a_profile_get_accumulator_value(unsigned int acc);
+float nv2a_profile_get_accumulator_average_value(unsigned int acc);
+
 void nv2a_profile_increment(void);
 void nv2a_profile_flip_stall(void);
 
@@ -150,6 +184,15 @@ static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {
     g_nv2a_stats.frame_working.counters[cnt] += 1;
 }
+
+static inline void nv2a_profile_accumulate(enum NV2A_PROF_ACCUMULATORS_ENUM acc, int val)
+{
+    g_nv2a_stats.frame_working.accumulators[acc].events += 1;
+    g_nv2a_stats.frame_working.accumulators[acc].total += val;
+}
+
+int64_t nv2a_profile_duration_start(void);
+void nv2a_profile_accumulate_duration_us(enum NV2A_PROF_ACCUMULATORS_ENUM acc, int64_t start);
 
 #ifdef CONFIG_RENDERDOC
 void nv2a_dbg_renderdoc_init(void);

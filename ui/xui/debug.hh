@@ -57,9 +57,12 @@ private:
 
     static constexpr int NUM_EXTRA_COUNTERS = 1;
     static constexpr int INDEX_MSPF = NV2A_PROF__COUNT;
+    static constexpr int INDEX_TIMING_MSPF = NV2A_PROF_ACCUMULATORS__COUNT;
 
     int m_hovered_counter_index;
+    int m_hovered_accumulator_index;
     bool m_counter_visible[NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS];
+    bool m_timing_visible[NV2A_PROF_ACCUMULATORS__COUNT + 1];
 
     std::vector<const char *> m_legend_names;
     std::vector<int> m_legend_indices_sorted_az;
@@ -67,7 +70,9 @@ private:
     std::vector<CounterEntry> m_counter_index_to_value;
 
     void DrawAdvancedContent();
+    void DrawFrameTimingBreakdownContent();
     int FindHoveredPlotLineIndex();
+    int FindHoveredAccumulatorIndex();
 };
 
 extern DebugApuWindow apu_window;
