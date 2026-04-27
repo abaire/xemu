@@ -24,6 +24,7 @@
 
 void pgraph_vk_draw_begin(NV2AState *d)
 {
+    int64_t draw_begin_start = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
 
     NV2A_VK_DPRINTF("NV097_SET_BEGIN_END: 0x%x", d->pgraph.primitive_mode);
@@ -40,6 +41,9 @@ void pgraph_vk_draw_begin(NV2AState *d)
     bool is_nop_draw = !(color_write || depth_test || stencil_test);
 
     pgraph_vk_surface_update(d, true, true, depth_test || stencil_test);
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_BEGIN,
+                                        draw_begin_start);
 
     if (is_nop_draw) {
         NV2A_VK_DPRINTF("nop!");
@@ -1657,6 +1661,7 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
 
 void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 {
+    int64_t clear_surface_start = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -1676,6 +1681,8 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     if (!binding) {
         /* Nothing bound to clear */
         pg->clearing = false;
+        nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_CLEAR_SURFACE,
+                                            clear_surface_start);
         return;
     }
 
@@ -1783,6 +1790,9 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     pgraph_vk_set_surface_dirty(pg, write_color, write_zeta);
 
     NV2A_VK_DGROUP_END();
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_CLEAR_SURFACE,
+                                        clear_surface_start);
 }
 
 #if 0
@@ -2036,7 +2046,7 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
 
 void pgraph_vk_flush_draw(NV2AState *d)
 {
-    int64_t start = nv2a_profile_duration_start();
+    int64_t flush_draw_start = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -2208,5 +2218,5 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
-    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_FLUSH, start);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_FLUSH, flush_draw_start);
 }
