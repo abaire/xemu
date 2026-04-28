@@ -479,10 +479,20 @@ static void update_shader_uniforms(PGRAPHState *pg)
                           PshUniform__COUNT);
 
     for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
-        uint64_t hash =
-            fast_hash(layouts[i]->allocation, layouts[i]->total_size);
-        r->uniforms_changed |= (hash != r->uniform_buffer_hashes[i]);
-        r->uniform_buffer_hashes[i] = hash;
+        size_t size = layouts[i]->total_size;
+        void *current_data = layouts[i]->allocation;
+
+        if (G_UNLIKELY(r->uniform_shadow_copies[i].capacity < size)) {
+            r->uniform_shadow_copies[i].data =
+                g_realloc(r->uniform_shadow_copies[i].data, size);
+            r->uniform_shadow_copies[i].capacity = size;
+
+            memcpy(r->uniform_shadow_copies[i].data, current_data, size);
+            r->uniforms_changed = true;
+        } else if (memcmp(current_data, r->uniform_shadow_copies[i].data, size) != 0) {
+            memcpy(r->uniform_shadow_copies[i].data, current_data, size);
+            r->uniforms_changed = true;
+        }
     }
 
     nv2a_profile_inc_counter(r->uniforms_changed ?
@@ -534,6 +544,14 @@ void pgraph_vk_init_shaders(PGRAPHState *pg)
 
 void pgraph_vk_finalize_shaders(PGRAPHState *pg)
 {
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    for (int i = 0; i < 2; i++) {
+        g_free(r->uniform_shadow_copies[i].data);
+        r->uniform_shadow_copies[i].data = NULL;
+        r->uniform_shadow_copies[i].capacity = 0;
+    }
+
     shader_cache_finalize(pg);
     destroy_descriptor_sets(pg);
     destroy_descriptor_set_layout(pg);
