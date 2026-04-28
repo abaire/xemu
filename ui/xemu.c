@@ -61,6 +61,7 @@
 #include <SDL3/SDL.h>
 
 #ifndef DEBUG_XEMU_C
+// DONOTSUBMIT
 #define DEBUG_XEMU_C 0
 #endif
 
@@ -280,6 +281,44 @@ static void send_mouse_event(struct xemu_console *scon, int dx, int dy,
     qemu_input_event_sync();
 }
 
+static const SDL_DisplayMode *
+get_best_fullscreen_mode(SDL_DisplayMode **modes, int num_modes)
+{
+    static const float TARGET_REFRESH_RATE = 60.f;
+    static const float MIN_REFRESH_RATE = 30.f;
+
+    if (!modes || num_modes <= 0) {
+        return NULL;
+    }
+
+    // First mode is the highest resolution, typically the native resolution
+    const SDL_DisplayMode *mode = modes[0];
+    int screen_width = mode->w;
+    int screen_height = mode->h;
+    float best_refresh_delta = mode->refresh_rate - TARGET_REFRESH_RATE;
+
+    for (int i = 1; i < num_modes; ++i) {
+        const SDL_DisplayMode *candidate = modes[i];
+
+        if (candidate->w < screen_width || candidate->h < screen_height ||
+            candidate->refresh_rate < MIN_REFRESH_RATE) {
+            break;
+        }
+
+        float refresh_delta = candidate->refresh_rate - TARGET_REFRESH_RATE;
+        if (SDL_fabsf(refresh_delta) < SDL_fabsf(best_refresh_delta)) {
+            mode = candidate;
+            best_refresh_delta = refresh_delta;
+        } else if (refresh_delta == best_refresh_delta &&
+                   candidate->format == mode->format &&
+                   candidate->pixel_density > mode->pixel_density) {
+            mode = candidate;
+        }
+    }
+
+    return mode;
+}
+
 static void set_full_screen(struct xemu_console *scon, bool set)
 {
     gui_fullscreen = set;
@@ -292,10 +331,7 @@ static void set_full_screen(struct xemu_console *scon, bool set)
             if (display) {
                 int num_modes = 0;
                 modes = SDL_GetFullscreenDisplayModes(display, &num_modes);
-                if (modes && num_modes > 0) {
-                    // First mode is the highest resolution, typically the native resolution
-                    mode = modes[0];
-                }
+                mode = get_best_fullscreen_mode(modes, num_modes);
             }
             if (mode) {
                 fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate);
@@ -777,6 +813,9 @@ static void *vblank_timer_thread(void *opaque)
 }
 
 #if DEBUG_XEMU_C
+static uint64_t event_loops_since_update = 0;
+static uint64_t last_forced_delay = 0;
+static uint64_t cumulative_delay = 0;
 static void report_stats(void)
 {
     uint64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
@@ -786,12 +825,18 @@ static void report_stats(void)
     num_frames += 1;
     if (delta_ms >= 1000) {
         DPRINTF("[[ ");
-        DPRINTF("vblank @%fHz avg", fps);
+        DPRINTF("vblank @%fHz avg, %d frames / %llu ms = %f", fps, num_frames, delta_ms, (double)num_frames / ((double)(delta_ms) / 1000.0));
+        DPRINTF(" - last delay %llu, cumulative %llu", last_forced_delay, cumulative_delay);
+        DPRINTF(" - loops %llu", event_loops_since_update);
         DPRINTF(" - bql %"PRId64"ns/iter, %g%% time avg", lock_held_acc/num_frames, (double)lock_held_acc/(double)(delta_ms * 10000.0));
         DPRINTF(" ]]\n");
+
         lock_held_acc = 0;
         last_reported = now;
         num_frames = 0;
+        last_forced_delay = 0;
+        cumulative_delay = 0;
+        event_loops_since_update = 0;
     }
 }
 #endif
@@ -802,8 +847,10 @@ static void report_stats(void)
  */
 static void gl_render_frame(struct xemu_console *scon)
 {
+    static GLsync frame_sync = NULL;
     static bool rendering;
     if (qatomic_xchg(&rendering, true) || qatomic_read(&qemu_exiting)) {
+        fprintf(stderr, "WARNING: gl_render_frame called while rendering\n");
         return;
     }
 
@@ -851,7 +898,18 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    glFinish();
+
+    if (frame_sync) {
+        glClientWaitSync(frame_sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
+        glDeleteSync(frame_sync);
+        frame_sync = NULL;
+    } else if (!g_debug_hackery_settings.fence_sync) {
+        if (g_debug_hackery_settings.flush_instead_of_finish) {
+            glFlush();
+        } else {
+            glFinish();
+        }
+    }
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
@@ -862,6 +920,10 @@ static void gl_render_frame(struct xemu_console *scon)
     nv2a_release_framebuffer_surface();
     SDL_GL_SwapWindow(scon->real_window);
     assert(glGetError() == GL_NO_ERROR);
+
+    if (g_debug_hackery_settings.fence_sync) {
+        frame_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
 
     qatomic_set(&rendering, false);
 
@@ -1095,7 +1157,17 @@ static void display_early_init(DisplayOptions *o)
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
-    SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
+    int interval = g_config.display.window.vsync ? 1 : 0;
+    fprintf(stderr, "VSYNC setting %s\n", interval ? "ON" : "OFF");
+
+    if (!interval) {
+        SDL_GL_SetSwapInterval(0);
+    } else if (SDL_GL_SetSwapInterval(-1)) {
+        fprintf(stderr, "VSYNC adaptive\n");
+    } else if (!SDL_GL_SetSwapInterval(1)) {
+        fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
+                SDL_GetError());
+    }
     xemu_hud_init(m_window, m_context);
 }
 
@@ -1368,10 +1440,47 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
+    static int64_t next_frame = 0;
+    static int64_t next_poll = 0;
+
     while (!qatomic_read(&qemu_exiting)) {
-        poll_events(scon);
-        gl_render_frame(scon);
+        int64_t now = 0;
+        if (g_debug_hackery_settings.render_frequency_ns > 0 ||
+            g_debug_hackery_settings.poll_frequency_ns > 0) {
+            now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        }
+
+        if (!g_debug_hackery_settings.poll_frequency_ns || now >= next_poll) {
+            poll_events(scon);
+            next_poll = now + g_debug_hackery_settings.poll_frequency_ns;
+        }
+
+        if (!g_debug_hackery_settings.render_frequency_ns ||
+            now >= next_frame) {
+            gl_render_frame(scon);
+            next_frame = now + g_debug_hackery_settings.render_frequency_ns;
+        }
+
+        if (g_debug_hackery_settings.render_frequency_ns > 0 &&
+            g_debug_hackery_settings.poll_frequency_ns > 0) {
+            int64_t deadline = MIN(next_poll, next_frame);
+            if (now < deadline) {
+#if DEBUG_XEMU_C
+                last_forced_delay = deadline - now;
+                cumulative_delay += last_forced_delay;
+#endif
+                SDL_DelayPrecise(deadline - now);
+            }
+        } else if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
+            SDL_Delay(
+                g_debug_hackery_settings.yield_in_event_loop_milliseconds);
+        }
+
+#if DEBUG_XEMU_C
+        ++event_loops_since_update;
+#endif
     }
+
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
     display_finalize();
