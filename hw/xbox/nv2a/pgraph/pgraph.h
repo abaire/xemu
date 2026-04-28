@@ -270,6 +270,8 @@ typedef struct PGRAPHState {
         PGRAPHGLState *gl_renderer_state;
         PGRAPHVkState *vk_renderer_state;
     };
+
+    GHashTable *method_last_values;
 } PGRAPHState;
 
 void pgraph_init(NV2AState *d);

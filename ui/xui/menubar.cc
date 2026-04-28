@@ -82,6 +82,12 @@ void ProcessKeyboardShortcuts(void)
         nv2a_dbg_renderdoc_capture_frames(num_frames, io.KeyCtrl);
     }
 #endif
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F8)) {
+        ImGuiIO& io = ImGui::GetIO();
+        int num_frames = io.KeyShift ? 60 : 1;
+        nv2a_dbg_pgraph_dump_draws(num_frames);
+    }
 }
 
 void ShowMainMenu()

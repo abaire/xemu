@@ -160,6 +160,10 @@ extern int renderdoc_capture_frames;
 extern bool renderdoc_trace_frames;
 #endif
 
+void nv2a_dbg_pgraph_dump_draws(int num_frames);
+struct NV2AState;
+void nv2a_dbg_pgraph_dump_draw(struct NV2AState *d);
+
 #ifdef __cplusplus
 }
 #endif

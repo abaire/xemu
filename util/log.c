@@ -44,6 +44,13 @@ static FILE *global_file;
 static __thread FILE *thread_file;
 static __thread Notifier qemu_log_thread_cleanup_notifier;
 
+static QemuLogHandler global_log_handler;
+
+void qemu_set_log_handler(QemuLogHandler handler)
+{
+    global_log_handler = handler;
+}
+
 unsigned qemu_loglevel;
 static bool log_per_thread;
 static GArray *debug_regions;
@@ -171,6 +178,13 @@ void qemu_log(const char *fmt, ...)
         vfprintf(f, fmt, ap);
         va_end(ap);
         qemu_log_unlock(f);
+    }
+
+    if (global_log_handler) {
+        va_list ap;
+        va_start(ap, fmt);
+        global_log_handler(fmt, ap);
+        va_end(ap);
     }
 }
 

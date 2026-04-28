@@ -8,6 +8,9 @@
  * The new API:
  */
 
+typedef void (*QemuLogHandler)(const char *fmt, va_list ap);
+void qemu_set_log_handler(QemuLogHandler handler);
+
 /* Returns true if qemu_log() will really write somewhere. */
 bool qemu_log_enabled(void);
 

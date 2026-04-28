@@ -28,12 +28,13 @@
 #include <stdarg.h>
 #include <assert.h>
 
-#ifdef CONFIG_RENDERDOC
 #include "trace/control.h"
 
+#ifdef CONFIG_RENDERDOC
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include "thirdparty/renderdoc_app.h"
 #endif
+#include "qemu/log.h"
 
 #define CHECK_GL_ERROR() do { \
   GLenum error = glGetError(); \
@@ -46,8 +47,276 @@
 static bool has_GL_GREMEDY_frame_terminator = false;
 static bool has_GL_KHR_debug = false;
 
+static int pgraph_dump_frames = 0;
+static int pgraph_dump_frame_id = 0;
+static int pgraph_dump_draw_id = 0;
+static void *pgraph_dump_file = NULL;
+static GMutex pgraph_dump_mutex;
+
+static void write_initial_state_entry(gpointer key, gpointer value, gpointer user_data)
+{
+    FILE *f = (FILE *)user_data;
+    uint32_t k = GPOINTER_TO_UINT(key);
+    uint32_t p = GPOINTER_TO_UINT(value);
+
+    uint32_t graphics_class = k >> 16;
+    uint32_t method = k & 0xFFFF;
+
+    /* Skip commands that trigger a draw, as they are not state and should
+     * not be part of the initial hardware setup. */
+    if (graphics_class == 0x97) {
+        if (method < 0x200 ||
+            method == NV097_SET_BEGIN_END ||
+            method == NV097_ARRAY_ELEMENT16 ||
+            method == NV097_ARRAY_ELEMENT32 ||
+            method == NV097_DRAW_ARRAYS ||
+            method == NV097_INLINE_ARRAY ||
+            method == NV097_GET_REPORT ||
+            method == NV097_CLEAR_SURFACE ||
+            method == NV097_SET_CONTEXT_DMA_A ||
+            method == NV097_SET_CONTEXT_DMA_B ||
+            method == NV097_SET_CONTEXT_DMA_COLOR ||
+            method == NV097_SET_CONTEXT_DMA_ZETA
+            )
+        {
+            return;
+        }
+    }
+
+    uint32_t entry[3];
+    entry[0] = graphics_class;
+    entry[1] = method;
+    entry[2] = p;
+    fwrite(entry, sizeof(uint32_t), 3, f);
+}
+
+static void nv2a_dbg_pgraph_log_handler(const char *fmt, va_list ap)
+{
+    if (g_str_has_prefix(fmt, "nv2a_pgraph_")) {
+        g_mutex_lock(&pgraph_dump_mutex);
+        if (pgraph_dump_file) {
+            vfprintf((FILE *)pgraph_dump_file, fmt, ap);
+        }
+        g_mutex_unlock(&pgraph_dump_mutex);
+    }
+}
+
+static void pgraph_dump_trace(const char *dir, const char *filename)
+{
+    g_mutex_lock(&pgraph_dump_mutex);
+    if (!pgraph_dump_file) {
+        g_mutex_unlock(&pgraph_dump_mutex);
+        return;
+    }
+    fflush((FILE *)pgraph_dump_file);
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s", dir, filename);
+
+    FILE *f_out = fopen(path, "w");
+    if (f_out) {
+        rewind((FILE *)pgraph_dump_file);
+        char buffer[4096];
+        size_t n;
+        while ((n = fread(buffer, 1, sizeof(buffer), (FILE *)pgraph_dump_file)) > 0) {
+            fwrite(buffer, 1, n, f_out);
+        }
+        fclose(f_out);
+
+        if (ftruncate(fileno((FILE *)pgraph_dump_file), 0) != 0) {
+            /* ignore error */
+        }
+        rewind((FILE *)pgraph_dump_file);
+    }
+    g_mutex_unlock(&pgraph_dump_mutex);
+}
+
+void nv2a_dbg_pgraph_dump_draws(int num_frames)
+{
+    if (num_frames > 0 && pgraph_dump_frames == 0) {
+        trace_enable_events("nv2a_pgraph_*");
+        g_mkdir_with_parents("pgraph_dump", S_IRWXU | S_IRWXG | S_IRWXO);
+        pgraph_dump_file = (void *)fopen("pgraph_dump/trace.tmp", "w+");
+        if (pgraph_dump_file) {
+            qemu_set_log_handler(nv2a_dbg_pgraph_log_handler);
+        }
+
+        FILE *f_state = fopen("pgraph_dump/initial-state.bin", "wb");
+        if (f_state) {
+            g_hash_table_foreach(g_nv2a->pgraph.method_last_values,
+                                 write_initial_state_entry, f_state);
+            fclose(f_state);
+        }
+    }
+    pgraph_dump_frames = num_frames;
+    pgraph_dump_frame_id = 0;
+    pgraph_dump_draw_id = 0;
+    if (pgraph_dump_file && num_frames == 0) {
+        qemu_set_log_handler(NULL);
+        fclose((FILE *)pgraph_dump_file);
+        pgraph_dump_file = NULL;
+    }
+}
+
+static void pgraph_dump_vram(NV2AState *d, hwaddr addr, size_t size,
+                             const char *path)
+{
+    if (addr + size > memory_region_size(d->vram)) {
+        return;
+    }
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        fwrite(d->vram_ptr + addr, 1, size, f);
+        fclose(f);
+    }
+}
+
+void nv2a_dbg_pgraph_dump_draw(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    if (pgraph_dump_frames <= 0) {
+        return;
+    }
+
+    char dir[512];
+    snprintf(dir, sizeof(dir), "pgraph_dump/frame_%03d/draw_%04d",
+             pgraph_dump_frame_id, pgraph_dump_draw_id);
+    int create_dir = g_mkdir_with_parents(dir, S_IRWXU | S_IRWXG | S_IRWXO);
+    g_assert(create_dir == 0);
+
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        if (pgraph_is_texture_enabled(pg, i)) {
+            TextureShape s = pgraph_get_texture_shape(pg, i);
+            hwaddr addr = pgraph_get_texture_phys_addr(pg, i);
+            size_t len = pgraph_get_texture_length(pg, &s);
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/tex_%d_0x%08" PRIx64 ".bin", dir,
+                     i, addr);
+            pgraph_dump_vram(d, addr, len, path);
+
+            size_t pal_len;
+            hwaddr pal_addr =
+                pgraph_get_texture_palette_phys_addr_length(pg, i, &pal_len);
+            if (pal_len > 0) {
+                snprintf(path, sizeof(path), "%s/pal_%d_0x%08" PRIx64 ".bin",
+                         dir, i, pal_addr);
+                pgraph_dump_vram(d, pal_addr, pal_len, path);
+            }
+        }
+    }
+
+    uint32_t min_vertex = 0;
+    uint32_t max_vertex = 0;
+    bool has_vertices = false;
+
+    if (pg->draw_arrays_length) {
+        min_vertex = pg->draw_arrays_min_start;
+        max_vertex = pg->draw_arrays_max_count - 1;
+        has_vertices = true;
+    } else if (pg->inline_elements_length) {
+        min_vertex = (uint32_t)-1;
+        max_vertex = 0;
+        for (int i = 0; i < pg->inline_elements_length; i++) {
+            min_vertex = MIN(min_vertex, pg->inline_elements[i]);
+            max_vertex = MAX(max_vertex, pg->inline_elements[i]);
+        }
+        has_vertices = true;
+    } else if (pg->inline_array_length) {
+        unsigned int offset = 0;
+        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+            VertexAttribute *attr = &pg->vertex_attributes[i];
+            if (attr->count == 0)
+                continue;
+            offset = ROUND_UP(offset, attr->size);
+            offset += attr->size * attr->count;
+            offset = ROUND_UP(offset, attr->size);
+        }
+        unsigned int vertex_size = offset;
+        unsigned int index_count = pg->inline_array_length * 4 / vertex_size;
+        min_vertex = 0;
+        max_vertex = index_count - 1;
+        has_vertices = true;
+    }
+
+    for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+        VertexAttribute *attr = &pg->vertex_attributes[i];
+        if (attr->count == 0)
+            continue;
+
+        char path[1024];
+        if (pg->inline_buffer_length > 0) {
+            snprintf(path, sizeof(path), "%s/vtx_%d_inline_buf.bin", dir, i);
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                fwrite(attr->inline_buffer, 1,
+                       pg->inline_buffer_length * 4 * sizeof(float), f);
+                fclose(f);
+            }
+        } else if (has_vertices && attr->offset != 0) {
+            snprintf(path, sizeof(path), "%s/vtx_%d_0x%08" PRIx64 ".bin", dir,
+                     i, attr->offset);
+            uint32_t stride = attr->stride;
+            uint32_t elem_size = attr->size * attr->count;
+            if (stride == 0) {
+                pgraph_dump_vram(d, attr->offset, elem_size, path);
+            } else {
+                hwaddr start = attr->offset + min_vertex * stride;
+                hwaddr end = attr->offset + max_vertex * stride + elem_size;
+                pgraph_dump_vram(d, start, end - start, path);
+            }
+        } else {
+            snprintf(path, sizeof(path), "%s/vtx_%d_constant.bin", dir, i);
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                fwrite(attr->inline_value, 1, sizeof(attr->inline_value), f);
+                fclose(f);
+            }
+        }
+    }
+
+    if (pg->inline_array_length > 0) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/inline_array.bin", dir);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(pg->inline_array, 1, pg->inline_array_length * 4, f);
+            fclose(f);
+        }
+    }
+
+    if (pg->inline_elements_length > 0) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/indices.bin", dir);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(pg->inline_elements, 1, pg->inline_elements_length * 4, f);
+            fclose(f);
+        }
+    }
+
+    char info_path[1024];
+    snprintf(info_path, sizeof(info_path), "%s/info.txt", dir);
+    FILE *f_info = fopen(info_path, "w");
+    if (f_info) {
+        fprintf(f_info, "Primitive Mode: %d\n", pg->primitive_mode);
+        fprintf(f_info, "Draw Arrays Length: %d\n", pg->draw_arrays_length);
+        fprintf(f_info, "Inline Elements Length: %d\n",
+                pg->inline_elements_length);
+        fprintf(f_info, "Inline Buffer Length: %d\n", pg->inline_buffer_length);
+        fprintf(f_info, "Inline Array Length: %d\n", pg->inline_array_length);
+        if (has_vertices) {
+            fprintf(f_info, "Vertex Range: [%u, %u]\n", min_vertex, max_vertex);
+        }
+        fclose(f_info);
+    }
+
+    pgraph_dump_trace(dir, "pgraph-draw.txt");
+    pgraph_dump_draw_id++;
+}
+
 void gl_debug_initialize(void)
 {
+    g_mutex_init(&pgraph_dump_mutex);
     has_GL_KHR_debug = glo_check_extension("GL_KHR_debug");
     has_GL_GREMEDY_frame_terminator = glo_check_extension("GL_GREMEDY_frame_terminator");
 
@@ -149,6 +418,27 @@ void gl_debug_label(GLenum target, GLuint name, const char *fmt, ...)
 void gl_debug_frame_terminator(void)
 {
     CHECK_GL_ERROR();
+
+    if (pgraph_dump_frames > 0) {
+        if (pgraph_dump_file) {
+            char dir[512];
+            snprintf(dir, sizeof(dir), "pgraph_dump/frame_%03d",
+                     pgraph_dump_frame_id);
+            pgraph_dump_trace(dir, "pgraph-terminator.txt");
+        }
+        --pgraph_dump_frames;
+        ++pgraph_dump_frame_id;
+        pgraph_dump_draw_id = 0;
+        if (pgraph_dump_frames == 0) {
+            trace_enable_events("-nv2a_pgraph_*");
+            fprintf(stderr, "Frame recording completed\n");
+            if (pgraph_dump_file) {
+                qemu_set_log_handler(NULL);
+                fclose((FILE *)pgraph_dump_file);
+                pgraph_dump_file = NULL;
+            }
+        }
+    }
 
 #ifdef CONFIG_RENDERDOC
     if (nv2a_dbg_renderdoc_available()) {

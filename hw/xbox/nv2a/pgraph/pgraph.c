@@ -244,6 +244,8 @@ void pgraph_init(NV2AState *d)
     }
 
     pgraph_clear_dirty_reg_map(pg);
+
+    pg->method_last_values = g_hash_table_new(g_direct_hash, g_direct_equal);
 }
 
 void pgraph_clear_dirty_reg_map(PGRAPHState *pg)
@@ -349,6 +351,11 @@ void pgraph_destroy(PGRAPHState *pg)
 
     if (pg->renderer->ops.finalize) {
        pg->renderer->ops.finalize(d);
+    }
+
+    if (pg->method_last_values) {
+        g_hash_table_destroy(pg->method_last_values);
+        pg->method_last_values = NULL;
     }
 
     qemu_mutex_destroy(&pg->lock);
@@ -514,10 +521,14 @@ static const struct {
 #undef DEF_METHOD_CASE_4_OFFSET
 #undef DEF_METHOD_CASE_4
 
-static void pgraph_method_log(unsigned int subchannel,
-                              unsigned int graphics_class,
-                              unsigned int method, uint32_t parameter)
+static void pgraph_method_log(PGRAPHState *pg, unsigned int subchannel,
+                               unsigned int graphics_class,
+                               unsigned int method, uint32_t parameter)
 {
+    uint32_t key = (graphics_class << 16) | method;
+    g_hash_table_insert(pg->method_last_values, GUINT_TO_POINTER(key),
+                        GUINT_TO_POINTER(parameter));
+
     const char *method_name = "?";
     static unsigned int last = 0;
     static unsigned int count = 0;
@@ -568,7 +579,7 @@ static void pgraph_method_inc(MethodFunc handler, uint32_t end,
     for (size_t i = 0; i < count; i++) {
         parameter = ldl_le_p(parameters + i);
         if (i) {
-            pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
+            pgraph_method_log(pg, subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
         }
         handler(METHOD_HANDLER_ARGS);
@@ -587,7 +598,7 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
     for (size_t i = 0; i < num_words_available; i++) {
         parameter = ldl_le_p(parameters + i);
         if (i) {
-            pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
+            pgraph_method_log(pg, subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
         }
         handler(METHOD_HANDLER_ARGS);
@@ -669,7 +680,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
     uint32_t graphics_class = PG_GET_MASK(NV_PGRAPH_CTX_SWITCH1,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
 
-    pgraph_method_log(subchannel, graphics_class, method, parameter);
+    pgraph_method_log(pg, subchannel, graphics_class, method, parameter);
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d
@@ -763,6 +774,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
             if (image_blit->width && image_blit->height) {
                 d->pgraph.renderer->ops.image_blit(d);
+                nv2a_dbg_pgraph_dump_draw(d);
             }
             break;
         default:
@@ -2506,6 +2518,7 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         }
         nv2a_profile_inc_counter(NV2A_PROF_BEGIN_ENDS);
         d->pgraph.renderer->ops.draw_end(d);
+        nv2a_dbg_pgraph_dump_draw(d);
         pgraph_reset_inline_buffers(pg);
         pg->primitive_mode = PRIM_TYPE_INVALID;
     } else {
@@ -2666,6 +2679,7 @@ static void pgraph_expand_draw_arrays(NV2AState *d)
      * BEGIN+DA+ARRAY_ELEMENT+... chain that caused this expansion. */
     if (pg->draw_arrays_length > 1) {
         d->pgraph.renderer->ops.flush_draw(d);
+        nv2a_dbg_pgraph_dump_draw(d);
         pgraph_reset_inline_buffers(pg);
     }
     assert((pg->inline_elements_length + count) < NV2A_MAX_BATCH_LENGTH);
@@ -2904,6 +2918,7 @@ DEF_METHOD(NV097, SET_COLOR_CLEAR_VALUE)
 DEF_METHOD(NV097, CLEAR_SURFACE)
 {
     d->pgraph.renderer->ops.clear_surface(d, parameter);
+    nv2a_dbg_pgraph_dump_draw(d);
 }
 
 DEF_METHOD(NV097, SET_CLEAR_RECT_HORIZONTAL)
