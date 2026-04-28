@@ -55,6 +55,8 @@
 #include "hw/xbox/nv2a/nv2a.h"
 #include "ui/xemu-notifications.h"
 
+#include "util/profiler.h"
+
 #include <stb_image.h>
 #include <locale.h>
 #include <math.h>
@@ -1279,6 +1281,8 @@ int main(int argc, char **argv)
 {
     QemuThread thread;
 
+    PROF_INIT(profiler_handle);
+
     setlocale(LC_NUMERIC, "C");
 
 #ifdef _WIN32
@@ -1375,6 +1379,9 @@ int main(int argc, char **argv)
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
     display_finalize();
+
+    PROF_SHUTDOWN(profiler_handle);
+
     return exit_status;
 }
 

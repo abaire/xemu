@@ -36,6 +36,7 @@ xemu_ss.add(files(
 
 if host_os == 'windows'
   xemu_ss.add(nvapi)
+  xemu_ss.add(superluminal)
 endif
 
 subdir('xui')
