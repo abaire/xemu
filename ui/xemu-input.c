@@ -36,7 +36,7 @@
 
 #include "system/blockdev.h"
 
-// #define DEBUG_INPUT
+#define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
 #define DPRINTF(fmt, ...) \
@@ -102,7 +102,7 @@ static const char **port_index_to_settings_key_map[] = {
 static const char **port_index_to_driver_settings_key_map[] = {
     &g_config.input.bindings.port1_driver,
     &g_config.input.bindings.port2_driver,
-    &g_config.input.bindings.port3_driver, 
+    &g_config.input.bindings.port3_driver,
     &g_config.input.bindings.port4_driver
 };
 
@@ -244,7 +244,7 @@ static const char *get_bound_driver(int port)
     assert(port >= 0 && port <= 3);
     const char *driver = *port_index_to_driver_settings_key_map[port];
 
-    // If the driver in the config is NULL, empty, or unrecognized 
+    // If the driver in the config is NULL, empty, or unrecognized
     // then default to DRIVER_DUKE
     if (driver == NULL)
         return DRIVER_DUKE;
@@ -266,6 +266,10 @@ void xemu_input_init(void)
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     }
 
+    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD,
+                g_config.input.sdl_joystick_thread ? "1" : "0");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI,
+                g_config.input.sdl_hidapi ? "1" : "0");
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "Failed to initialize SDL gamepad subsystem: %s\n", SDL_GetError());
         exit(1);
