@@ -36,7 +36,7 @@
 
 #include "system/blockdev.h"
 
-// #define DEBUG_INPUT
+#define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
 #define DPRINTF(fmt, ...) \
