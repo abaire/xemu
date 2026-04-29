@@ -572,6 +572,13 @@ void MainMenuInputView::Draw()
     Toggle("Background controller input capture",
            &g_config.input.background_input_capture,
            "Capture even if window is unfocused (requires restart)");
+
+    Toggle("Use SDL HID driver",
+           &g_config.input.sdl_hidapi,
+           "Use HID input drivers (requires restart)");
+    Toggle("Use SDL joystick background thread",
+           &g_config.input.sdl_joystick_thread,
+           "Capture input devices off the main thread (requires restart)");
 }
 
 void MainMenuInputView::Hide()
