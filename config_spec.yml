@@ -60,6 +60,10 @@ input:
     type: bool
     default: true
   background_input_capture: bool
+  sdl_hidapi:
+    type: bool
+    default: true
+  sdl_joystick_thread: bool
   keyboard_controller_scancode_map:
     # Scancode reference : https://github.com/libsdl-org/SDL/blob/main/include/SDL_scancode.h
     a:
