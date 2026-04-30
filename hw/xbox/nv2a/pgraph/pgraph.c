@@ -557,6 +557,67 @@ static void pgraph_method_log(unsigned int subchannel,
     last = method;
 }
 
+static void pgraph_state_method_track(PGRAPHState *pg, unsigned int subchannel,
+                                      unsigned int graphics_class,
+                                      unsigned int method, uint32_t parameter)
+{
+    if (graphics_class == NV_KELVIN_PRIMITIVE) {
+        if (method / 4 < ARRAY_SIZE(pg->kelvin_state)) {
+            pg->kelvin_state[method / 4] = parameter;
+            pg->kelvin_state_valid[method / 4] = true;
+        }
+    }
+}
+
+#define _X(item ) [item] = true
+static bool dump_state_ignore_methods[] = {
+    _X(NV097_BACK_END_WRITE_SEMAPHORE_RELEASE),
+    _X(NV097_CLEAR_SURFACE),
+    _X(NV097_FLIP_INCREMENT_WRITE),
+    _X(NV097_FLIP_STALL),
+    _X(NV097_NO_OPERATION),
+    _X(NV097_SET_BEGIN_END),
+    _X(NV097_SET_CONTEXT_DMA_A),
+    _X(NV097_SET_CONTEXT_DMA_B),
+    _X(NV097_SET_CONTEXT_DMA_COLOR),
+    _X(NV097_SET_CONTEXT_DMA_NOTIFIES),
+    _X(NV097_SET_CONTEXT_DMA_REPORT),
+    _X(NV097_SET_CONTEXT_DMA_SEMAPHORE),
+    _X(NV097_SET_CONTEXT_DMA_STATE),
+    _X(NV097_SET_CONTEXT_DMA_VERTEX_A),
+    _X(NV097_SET_CONTEXT_DMA_VERTEX_B),
+    _X(NV097_SET_CONTEXT_DMA_ZETA),
+    _X(NV097_SET_FLIP_MODULO),
+    _X(NV097_SET_FLIP_READ),
+    _X(NV097_SET_FLIP_WRITE),
+    _X(NV097_SET_OBJECT),
+    _X(NV097_SET_SEMAPHORE_OFFSET),
+    _X(NV097_SET_SURFACE_COLOR_OFFSET),
+    _X(NV097_SET_SURFACE_ZETA_OFFSET),
+    _X(NV097_SET_TEXTURE_OFFSET),
+    _X(NV097_WAIT_FOR_IDLE),
+};
+#undef _X
+
+void nv2a_dump_pgraph_state(void)
+{
+    if (!g_nv2a) {
+        return;
+    }
+
+    trace_nv2a_pgraph_method_unhandled(0xFF, 0xFF, 0xDEADBEEF, 0xF00D);
+
+    PGRAPHState *pg = &g_nv2a->pgraph;
+    for (int i = 0; i < ARRAY_SIZE(pg->kelvin_state); ++i) {
+        if (!dump_state_ignore_methods[i * 4] && pg->kelvin_state_valid[i]) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE, i * 4,
+                              pg->kelvin_state[i]);
+        }
+    }
+
+    trace_nv2a_pgraph_method_unhandled(0xFF, 0xFF, 0xDEADBEEF, 0xF00D);
+}
+
 static void pgraph_method_inc(MethodFunc handler, uint32_t end,
                               METHOD_HANDLER_ARG_DECL)
 {
@@ -570,6 +631,8 @@ static void pgraph_method_inc(MethodFunc handler, uint32_t end,
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
         method += 4;
@@ -589,6 +652,8 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
     }
@@ -670,6 +735,8 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
 
     pgraph_method_log(subchannel, graphics_class, method, parameter);
+    pgraph_state_method_track(pg, subchannel, graphics_class, method,
+                              parameter);
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d
