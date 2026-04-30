@@ -690,6 +690,15 @@ void pgraph_dump_context(NV2AState *d)
     trace_nv2a_pgraph_context_marker("=== END NV2A PGRAPH CONTEXT ===\n\n\n\n");
 }
 
+void nv2a_dump_pgraph_state(void)
+{
+    if (!g_nv2a) {
+        return;
+    }
+
+	pgraph_dump_context(g_nv2a);
+}
+
 static void pgraph_method_inc(MethodFunc handler, uint32_t end,
                               METHOD_HANDLER_ARG_DECL)
 {

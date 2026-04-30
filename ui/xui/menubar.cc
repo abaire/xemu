@@ -96,6 +96,10 @@ void ProcessKeyboardShortcuts(void)
         } else {
             trace_enable_events(nv2a_reg_disable);
         }
+
+        if (pgraph_trace_state) {
+            nv2a_dump_pgraph_state();
+        }
     }
 
 #ifdef CONFIG_RENDERDOC
