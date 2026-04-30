@@ -160,6 +160,8 @@ extern int renderdoc_capture_frames;
 extern bool renderdoc_trace_frames;
 #endif
 
+void nv2a_dump_pgraph_state(void);
+
 #ifdef __cplusplus
 }
 #endif
