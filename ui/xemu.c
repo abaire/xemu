@@ -1257,7 +1257,7 @@ static void setup_nvidia_profile(void)
             .profile_name = L"xemu",
             .executable_name = exe_name,
             .threaded_optimization = false,
-            .present_method_flags = OGL_DX_PRESENT_DEBUG_ALLOW_DXVK_PROMOTION | OGL_DX_PRESENT_DEBUG_ENABLE_DFLIP_ALWAYS | OGL_DX_PRESENT_DEBUG_DISABLE_FULLSCREEN_OPT | OGL_DX_PRESENT_DEBUG_UNDOCUMENTED_DXGI_SPEEDUP,
+            .present_method_flags = 0x000802A5,
         });
         nvapi_finalize();
     }
