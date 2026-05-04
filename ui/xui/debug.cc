@@ -597,7 +597,7 @@ int DebugVideoWindow::FindHoveredAccumulatorIndex()
         if (!m_timing_visible[i]) {
             continue;
         }
-        double next_sum = current_sum + frame.accumulators[i].total;
+        double next_sum = current_sum + GetAccumulatorOwnValue(i, data_idx);
         if (mouse_pos.y >= current_sum && mouse_pos.y < next_sum) {
             return i;
         }
@@ -840,10 +840,20 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                 text_col = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
             }
 
+            int depth = 0;
+            if (!is_mspf) {
+                int parent = nv2a_debug::kAccumulatorTree[idx].parent_index;
+                while (parent != -1) {
+                    depth++;
+                    parent = nv2a_debug::kAccumulatorTree[parent].parent_index;
+                }
+            }
+
             ImGui::PushFont(g_font_mgr.m_fixed_width_font);
             float swatch_size = ImGui::GetTextLineHeight();
             float spacing = ImGui::GetStyle().ItemSpacing.x;
             ImVec2 p = ImGui::GetCursorScreenPos();
+            p.x += depth * 15.0f * g_viewport_mgr.m_scale;
 
             if (enabled) {
                 ImVec4 swatch_col = is_mspf ? ImVec4(1, 1, 1, 1) :
@@ -854,15 +864,21 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
             }
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + swatch_size +
-                                 spacing);
+                                 spacing + depth * 15.0f * g_viewport_mgr.m_scale);
+
+            std::string display_name = name;
+            auto pos = display_name.rfind("__");
+            if (pos != std::string::npos) {
+                display_name = display_name.substr(pos + 2);
+            }
 
             ImGui::PushStyleColor(ImGuiCol_Text, text_col);
             char buf[256];
             if (is_mspf) {
-                snprintf(buf, sizeof(buf), "%s: %d ms###LgndT%d", name, total,
+                snprintf(buf, sizeof(buf), "%s: %d ms###LgndT%d", display_name.c_str(), total,
                          idx);
             } else {
-                snprintf(buf, sizeof(buf), "%s: %d : %d###LgndT%d", name, total,
+                snprintf(buf, sizeof(buf), "%s: %d : %d###LgndT%d", display_name.c_str(), total,
                          events, idx);
             }
 
@@ -926,7 +942,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
 
                 const char *name = nv2a_profile_get_accumulator_name(
                     (NV2A_PROF_ACCUMULATORS_ENUM)i);
-                float alpha = (effective_hover == i) ? 0.8f : 0.25f;
+                float alpha = (effective_hover != -1 && IsDescendantOrSelf(effective_hover, i)) ? 0.8f : 0.25f;
                 ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, alpha);
                 ImPlot::PushStyleColor(ImPlotCol_Fill,
                                        ImPlot::GetColormapColor(i));
@@ -939,9 +955,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                         double sum = 0;
                         for (int k = 0; k <= c->i; ++k) {
                             if (c->window->m_timing_visible[k]) {
-                                sum += g_nv2a_stats.frame_history[frame_idx]
-                                           .accumulators[k]
-                                           .total;
+                                sum += c->window->GetAccumulatorOwnValue(k, frame_idx);
                             }
                         }
                         return ImPlotPoint(idx, sum);
@@ -954,9 +968,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                         double sum = 0;
                         for (int k = 0; k < c->i; ++k) {
                             if (c->window->m_timing_visible[k]) {
-                                sum += g_nv2a_stats.frame_history[frame_idx]
-                                           .accumulators[k]
-                                           .total;
+                                sum += c->window->GetAccumulatorOwnValue(k, frame_idx);
                             }
                         }
                         return ImPlotPoint(idx, sum);
@@ -987,6 +999,42 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
         ImGui::EndTable();
     }
     m_hovered_accumulator_index = new_hovered_accumulator_index;
+}
+
+double DebugVideoWindow::GetVisibleDescendantsTotal(int acc_index, int frame_idx) const
+{
+    double sum = 0;
+    const auto &node = nv2a_debug::kAccumulatorTree[acc_index];
+    for (int i = 0; i < node.num_children; ++i) {
+        int child_idx = node.children[i];
+        if (m_timing_visible[child_idx]) {
+            sum += g_nv2a_stats.frame_history[frame_idx].accumulators[child_idx].total;
+        } else {
+            sum += GetVisibleDescendantsTotal(child_idx, frame_idx);
+        }
+    }
+    return sum;
+}
+
+double DebugVideoWindow::GetAccumulatorOwnValue(int acc_index, int frame_idx) const
+{
+    if (!m_timing_visible[acc_index]) {
+        return 0.0;
+    }
+    double own_value = g_nv2a_stats.frame_history[frame_idx].accumulators[acc_index].total;
+    own_value -= GetVisibleDescendantsTotal(acc_index, frame_idx);
+    return std::max(0.0, own_value);
+}
+
+bool DebugVideoWindow::IsDescendantOrSelf(int ancestor, int node_idx) const
+{
+    if (ancestor == node_idx) return true;
+    int p = nv2a_debug::kAccumulatorTree[node_idx].parent_index;
+    while (p != -1) {
+        if (p == ancestor) return true;
+        p = nv2a_debug::kAccumulatorTree[p].parent_index;
+    }
+    return false;
 }
 
 DebugApuWindow apu_window;

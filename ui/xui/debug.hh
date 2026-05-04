@@ -19,6 +19,8 @@
 #pragma once
 
 #include <vector>
+#include <string_view>
+#include <array>
 
 #include "hw/xbox/nv2a/debug.h"
 
@@ -29,6 +31,46 @@ public:
     DebugApuWindow();
     void Draw();
 };
+
+namespace nv2a_debug {
+    struct AccumulatorNode {
+        int parent_index;
+        std::array<int, NV2A_PROF_ACCUMULATORS__COUNT> children;
+        int num_children;
+    };
+
+    constexpr std::array<AccumulatorNode, NV2A_PROF_ACCUMULATORS__COUNT> BuildAccumulatorTree() {
+        std::array<AccumulatorNode, NV2A_PROF_ACCUMULATORS__COUNT> tree{};
+        for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+            tree[i].parent_index = -1;
+            tree[i].num_children = 0;
+        }
+
+        constexpr std::array<std::string_view, NV2A_PROF_ACCUMULATORS__COUNT> names = {
+            #define _X(x) std::string_view(#x).substr(10),
+            NV2A_PROF_ACCUMULATORS_XMAC
+            #undef _X
+        };
+
+        for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+            std::string_view name = names[i];
+            auto pos = name.rfind("__");
+            if (pos != std::string_view::npos) {
+                std::string_view parent_name = name.substr(0, pos);
+                for (int j = 0; j < NV2A_PROF_ACCUMULATORS__COUNT; ++j) {
+                    if (names[j] == parent_name) {
+                        tree[i].parent_index = j;
+                        tree[j].children[tree[j].num_children++] = i;
+                        break;
+                    }
+                }
+            }
+        }
+        return tree;
+    }
+
+    inline constexpr auto kAccumulatorTree = BuildAccumulatorTree();
+}
 
 class DebugVideoWindow
 {
@@ -73,6 +115,10 @@ private:
     void DrawFrameTimingBreakdownContent();
     int FindHoveredPlotLineIndex();
     int FindHoveredAccumulatorIndex();
+
+    double GetVisibleDescendantsTotal(int acc_index, int frame_idx) const;
+    double GetAccumulatorOwnValue(int acc_index, int frame_idx) const;
+    bool IsDescendantOrSelf(int ancestor, int node) const;
 };
 
 extern DebugApuWindow apu_window;
