@@ -164,15 +164,16 @@ bool nvapi_setup_profile(NvApiProfileOpts opts)
         goto cleanup;
 	}
 
-    NVDRS_SETTING setting_dxpresent_flags = {
-        .version = NVDRS_SETTING_VER,
-        .settingId = OGL_DX_PRESENT_DEBUG_ID,
-        .settingType = NVDRS_DWORD_TYPE,
-        .u32CurrentValue = opts.present_method_flags,
-    };
-	if (!set_setting(&session, &profile, &setting_dxpresent_flags)) {
-        goto cleanup;
-	}
+        // Requires admin
+//    NVDRS_SETTING setting_dxpresent_flags = {
+//        .version = NVDRS_SETTING_VER,
+//        .settingId = OGL_DX_PRESENT_DEBUG_ID,
+//        .settingType = NVDRS_DWORD_TYPE,
+//        .u32CurrentValue = opts.present_method_flags,
+//    };
+//	if (!set_setting(&session, &profile, &setting_dxpresent_flags)) {
+//        goto cleanup;
+//	}
 
     if (NvAPI_DRS_SaveSettings(session)) {
         LOG("NvAPI_DRS_SaveSettings failed");
