@@ -2046,7 +2046,7 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
 
 void pgraph_vk_flush_draw(NV2AState *d)
 {
-    int64_t flush_draw_start = nv2a_profile_duration_start();
+    int64_t start = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -2218,5 +2218,5 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
-    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_FLUSH, flush_draw_start);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_DRAW_FLUSH, start);
 }

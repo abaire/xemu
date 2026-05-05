@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <numeric>
 #include <vector>
+#include <functional>
 
 #include "debug.hh"
 #include "common.hh"
@@ -900,7 +901,38 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
         };
 
         DrawLegendItem(INDEX_TIMING_MSPF, "MSPF", last_frame.mspf, 0, true);
+
+        std::vector<int> sorted_indices;
+        std::function<void(int)> add_node = [&](int node) {
+            sorted_indices.push_back(node);
+            
+            std::vector<int> children;
+            for (int i = 0; i < nv2a_debug::kAccumulatorTree[node].num_children; ++i) {
+                children.push_back(nv2a_debug::kAccumulatorTree[node].children[i]);
+            }
+            std::sort(children.begin(), children.end(), [&](int a, int b) {
+                return last_frame.accumulators[a].total > last_frame.accumulators[b].total;
+            });
+            for (int child : children) {
+                add_node(child);
+            }
+        };
+
+        std::vector<int> roots;
         for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+            if (nv2a_debug::kAccumulatorTree[i].parent_index == -1) {
+                roots.push_back(i);
+            }
+        }
+        std::sort(roots.begin(), roots.end(), [&](int a, int b) {
+            return last_frame.accumulators[a].total > last_frame.accumulators[b].total;
+        });
+
+        for (int root : roots) {
+            add_node(root);
+        }
+
+        for (int i : sorted_indices) {
             const char *name = nv2a_profile_get_accumulator_name(
                 (NV2A_PROF_ACCUMULATORS_ENUM)i);
             const auto &acc = last_frame.accumulators[i];
