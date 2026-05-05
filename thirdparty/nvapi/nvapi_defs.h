@@ -211,6 +211,8 @@ typedef struct _NVDRS_PROFILE_V1
 
 typedef NVDRS_PROFILE_V1         NVDRS_PROFILE;
 
+typedef int NvAPI_Status;
+
 //! Macro for constructing the version field of ::NVDRS_PROFILE
 #define NVDRS_PROFILE_VER1       MAKE_NVAPI_VERSION(NVDRS_PROFILE_V1,1)
 #define NVDRS_PROFILE_VER        NVDRS_PROFILE_VER1
@@ -226,7 +228,8 @@ typedef NVDRS_PROFILE_V1         NVDRS_PROFILE;
     FUNC(NvAPI_DRS_SaveSettings, 0xFCBC7E14)       \
     FUNC(NvAPI_DRS_SetSetting, 0x577DD202)         \
     FUNC(NvAPI_Initialize, 0x0150E828)             \
-    FUNC(NvAPI_Unload, 0xD22BDD7E)
+    FUNC(NvAPI_Unload, 0xD22BDD7E)                 \
+    FUNC(NvAPI_GetErrorMessage, 0x6C2D048C)
 
 typedef int(__cdecl *NvAPI_DRS_CreateApplication_t)(NvDRSSessionHandle, NvDRSProfileHandle, NVDRS_APPLICATION *);
 typedef int(__cdecl *NvAPI_DRS_CreateProfile_t)(NvDRSSessionHandle, NVDRS_PROFILE *, NvDRSProfileHandle *);
@@ -240,5 +243,6 @@ typedef int(__cdecl *NvAPI_DRS_SetSetting_t)(NvDRSSessionHandle, NvDRSProfileHan
 typedef int(__cdecl *NvAPI_Initialize_t)(void);
 typedef int(__cdecl *NvAPI_Unload_t)(void);
 typedef void *(__cdecl *NvAPI_QueryInterface_t)(unsigned int interface_id);
+typedef int(__cdecl *NvAPI_GetErrorMessage_t)(NvAPI_Status nr, NvAPI_ShortString szDesc);
 
 #endif

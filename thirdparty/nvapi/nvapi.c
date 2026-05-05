@@ -89,6 +89,20 @@ void nvapi_finalize(void)
     }
 }
 
+static bool set_setting(NvDRSSessionHandle *session, NvDRSProfileHandle *profile, NVDRS_SETTING *setting)
+{
+    NvAPI_Status status = NvAPI_DRS_SetSetting(*session, *profile, setting);
+    if (!status) {
+        return true;
+    }
+
+    NvAPI_ShortString error_description = {0};
+	NvAPI_GetErrorMessage(status, error_description);
+    LOG("NvAPI_DRS_SetSetting for settingId %x failed: %s",
+        setting->settingId, error_description);
+    return false;
+}
+
 bool nvapi_setup_profile(NvApiProfileOpts opts)
 {
     if (g_hnvapi == NULL) {
@@ -146,11 +160,9 @@ bool nvapi_setup_profile(NvApiProfileOpts opts)
                                OGL_THREAD_CONTROL_ENABLE :
                                OGL_THREAD_CONTROL_DISABLE,
     };
-    if (NvAPI_DRS_SetSetting(session, profile, &setting)) {
-        LOG("NvAPI_DRS_SetSetting for settingId %x failed",
-            setting.settingId);
+	if (!set_setting(&session, &profile, &setting)) {
         goto cleanup;
-    }
+	}
 
     NVDRS_SETTING setting_dxpresent_flags = {
         .version = NVDRS_SETTING_VER,
@@ -158,11 +170,9 @@ bool nvapi_setup_profile(NvApiProfileOpts opts)
         .settingType = NVDRS_DWORD_TYPE,
         .u32CurrentValue = opts.present_method_flags,
     };
-    if (NvAPI_DRS_SetSetting(session, profile, &setting_dxpresent_flags)) {
-        LOG("NvAPI_DRS_SetSetting for settingId %x failed",
-            setting_dxpresent_flags.settingId);
+	if (!set_setting(&session, &profile, &setting_dxpresent_flags)) {
         goto cleanup;
-    }
+	}
 
     if (NvAPI_DRS_SaveSettings(session)) {
         LOG("NvAPI_DRS_SaveSettings failed");
