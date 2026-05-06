@@ -757,6 +757,7 @@ static void update_fps(void)
     fps = 1000.0/avg;
 }
 
+static unsigned int vblank_count = 0;
 static void process_vblank(struct xemu_console *scon)
 {
     assert(bql_locked());
@@ -772,6 +773,7 @@ static void process_vblank(struct xemu_console *scon)
 #endif
 
     graphic_hw_update(scon->dcl.con);
+    ++vblank_count;
 }
 
 static void vblank_timer_callback(void *opaque)
@@ -847,6 +849,7 @@ static void report_stats(void)
  */
 static void gl_render_frame(struct xemu_console *scon)
 {
+    static unsigned int last_guest_frame_sync_vblank_count = 0xFFFF;  // Value must not equal vblank_count initializer.
     static GLsync frame_sync = NULL;
     static bool rendering;
     if (qatomic_xchg(&rendering, true) || qatomic_read(&qemu_exiting)) {
@@ -859,34 +862,39 @@ static void gl_render_frame(struct xemu_console *scon)
     bool flip_required = false;
     bool release_surface_texture = false;
 
-    /* XXX: Note that this bypasses the usual VGA path in order to quickly
-     * get the surface. This is simple and fast, at the cost of accuracy.
-     * Ideally, this should go through the VGA code and opportunistically pull
-     * the surface like this, but handle the VGA logic as well. For now, just
-     * use this fast path to handle the common case.
-     *
-     * In the event the surface is not found in the surface cache, e.g. when
-     * the guest code isn't using HW accelerated rendering, but just blitting
-     * to the framebuffer, fall back to the VGA path.
-     */
-    GLuint tex = nv2a_get_framebuffer_surface();
+    if (last_guest_frame_sync_vblank_count != vblank_count ||
+        !g_debug_hackery_settings.limit_framebuffer_fetches_to_guest_vblank) {
+        last_guest_frame_sync_vblank_count = vblank_count;
 
-    assert(glGetError() == GL_NO_ERROR);
+        /* XXX: Note that this bypasses the usual VGA path in order to quickly
+         * get the surface. This is simple and fast, at the cost of accuracy.
+         * Ideally, this should go through the VGA code and opportunistically pull
+         * the surface like this, but handle the VGA logic as well. For now, just
+         * use this fast path to handle the common case.
+         *
+         * In the event the surface is not found in the surface cache, e.g. when
+         * the guest code isn't using HW accelerated rendering, but just blitting
+         * to the framebuffer, fall back to the VGA path.
+         */
+        GLuint tex = nv2a_get_framebuffer_surface();
 
-    if (tex == 0) {
-        xemu_main_loop_lock();
-        // FIXME: Don't upload if notdirty
-        xb_surface_gl_create_texture(scon->surface);
-        tex = scon->surface->texture;
-        flip_required = true;
-        release_surface_texture = true;
-        xemu_main_loop_unlock();
+        assert(glGetError() == GL_NO_ERROR);
+
+        if (tex == 0) {
+            xemu_main_loop_lock();
+            // FIXME: Don't upload if notdirty
+            xb_surface_gl_create_texture(scon->surface);
+            tex = scon->surface->texture;
+            flip_required = true;
+            release_surface_texture = true;
+            xemu_main_loop_unlock();
+        }
+
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        xemu_snapshots_set_framebuffer_texture(tex, flip_required);
+        xemu_hud_set_framebuffer_texture(tex, flip_required);
     }
-
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
-    xemu_snapshots_set_framebuffer_texture(tex, flip_required);
-    xemu_hud_set_framebuffer_texture(tex, flip_required);
 
     /* FIXME: Finer locking. Event handlers in segments of the code expect
      * to be running on the main thread with the BQL. For now, acquire the

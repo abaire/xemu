@@ -71,6 +71,7 @@ DebugHackerySettings g_debug_hackery_settings = {
     .yield_in_event_loop_milliseconds = 0,
     .flush_instead_of_finish = false,
     .fence_sync = false,
+    .limit_framebuffer_fetches_to_guest_vblank = false,
 };
 
 static void InitializeStyle()
@@ -496,6 +497,14 @@ static void debug_hackery_overlay(void)
             ImGui::Checkbox("##Fence sync",
                             &local_state.fence_sync);
 
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Limit guest fb fetch");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Limit guest fb fetch",
+                            &local_state.limit_framebuffer_fetches_to_guest_vblank);
+
             ImGui::EndTable();
         }
 
@@ -508,7 +517,9 @@ static void debug_hackery_overlay(void)
              g_debug_hackery_settings.yield_in_event_loop_milliseconds) ||
             (local_state.flush_instead_of_finish !=
              g_debug_hackery_settings.flush_instead_of_finish) ||
-            (local_state.fence_sync != g_debug_hackery_settings.fence_sync);
+            (local_state.fence_sync != g_debug_hackery_settings.fence_sync) ||
+            (local_state.limit_framebuffer_fetches_to_guest_vblank !=
+             g_debug_hackery_settings.limit_framebuffer_fetches_to_guest_vblank);
 
         ImGui::BeginDisabled(!is_modified);
 
