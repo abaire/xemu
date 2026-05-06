@@ -91,6 +91,7 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
 void pfifo_kick(NV2AState *d)
 {
+    nv2a_profile_inc_counter(NV2A_PROF_PFIFO_KICKS);
     d->pfifo.fifo_kick = true;
     qemu_cond_broadcast(&d->pfifo.fifo_cond);
 }
