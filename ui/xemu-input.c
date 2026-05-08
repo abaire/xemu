@@ -271,6 +271,14 @@ void xemu_input_init(void)
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI,
                 g_config.input.sdl_hidapi ? "1" : "0");
 
+    // From testcontroller
+    SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "auto");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ROG_CHAKRAM, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_LINUX_DEADZONES, "1");
+
+
     SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_VERBOSE);
     SDL_hid_device_info *devs = SDL_hid_enumerate(0, 0);
     {
