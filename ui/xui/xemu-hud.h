@@ -37,6 +37,7 @@ typedef struct DebugHackerySettings {
     bool flush_instead_of_finish;
     bool fence_sync;
     bool limit_framebuffer_fetches_to_guest_vblank;
+    bool adaptive_ui_thread_sleep;
 
     int64_t poll_frequency_ns;
     int64_t render_frequency_ns;

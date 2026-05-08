@@ -72,6 +72,7 @@ DebugHackerySettings g_debug_hackery_settings = {
     .flush_instead_of_finish = false,
     .fence_sync = false,
     .limit_framebuffer_fetches_to_guest_vblank = false,
+    .adaptive_ui_thread_sleep = false,
 };
 
 static void InitializeStyle()
@@ -444,17 +445,17 @@ static void debug_hackery_overlay(void)
         ImGui::Separator();
 
         if (ImGui::BeginTable("##hackery_table", 2)) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("Poll FPS");
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##Poll FPS", &local_state.target_poll_fps,
-                                0)) {
-                if (local_state.target_poll_fps > 600)
-                    local_state.target_poll_fps = 600;
-            }
+//            ImGui::TableNextRow();
+//            ImGui::TableNextColumn();
+//            ImGui::AlignTextToFramePadding();
+//            ImGui::Text("Poll FPS");
+//            ImGui::TableNextColumn();
+//            ImGui::SetNextItemWidth(60.0f);
+//            if (ImGui::InputInt("##Poll FPS", &local_state.target_poll_fps,
+//                                0)) {
+//                if (local_state.target_poll_fps > 600)
+//                    local_state.target_poll_fps = 600;
+//            }
 
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -505,6 +506,14 @@ static void debug_hackery_overlay(void)
             ImGui::Checkbox("##Limit guest fb fetch",
                             &local_state.limit_framebuffer_fetches_to_guest_vblank);
 
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Adaptive UI sleep");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Adaptive UI sleep",
+                            &local_state.adaptive_ui_thread_sleep);
+
             ImGui::EndTable();
         }
 
@@ -519,7 +528,9 @@ static void debug_hackery_overlay(void)
              g_debug_hackery_settings.flush_instead_of_finish) ||
             (local_state.fence_sync != g_debug_hackery_settings.fence_sync) ||
             (local_state.limit_framebuffer_fetches_to_guest_vblank !=
-             g_debug_hackery_settings.limit_framebuffer_fetches_to_guest_vblank);
+             g_debug_hackery_settings.limit_framebuffer_fetches_to_guest_vblank) ||
+            (local_state.adaptive_ui_thread_sleep !=
+             g_debug_hackery_settings.adaptive_ui_thread_sleep);
 
         ImGui::BeginDisabled(!is_modified);
 
