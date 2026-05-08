@@ -542,6 +542,8 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
         DPRINTF("SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED ignoring\n");
     } else if (event->type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE) {
         DPRINTF("SDL_EVENT_GAMEPAD_SENSOR_UPDATE ignoring\n");
+    } else if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        DPRINTF("SDL_EVENT_GAMEPAD_BUTTON_DOWN\n");
     }
 }
 
