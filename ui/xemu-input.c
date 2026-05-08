@@ -260,7 +260,7 @@ static const char *get_bound_driver(int port)
 
 static const int port_map[4] = { 3, 4, 1, 2 };
 
-void xemu_input_init(void)
+void xemu_input_early_init(void)
 {
     if (g_config.input.background_input_capture) {
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -307,7 +307,10 @@ void xemu_input_init(void)
         exit(1);
     }
     SDL_Log("HIDAPI Enabled: %s", SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI));
+}
 
+void xemu_input_init(void)
+{
     // Create the keyboard input (always first)
     ControllerState *new_con = malloc(sizeof(ControllerState));
     memset(new_con, 0, sizeof(ControllerState));

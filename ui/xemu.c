@@ -1277,6 +1277,8 @@ static void init_sdl_app_metadata(void)
                                "https://xemu.app");
 }
 
+void xemu_input_early_init(void);
+
 int main(int argc, char **argv)
 {
     QemuThread thread;
@@ -1343,6 +1345,8 @@ int main(int argc, char **argv)
         setup_nvidia_profile();
     }
 #endif
+
+    xemu_input_early_init();
 
     display_very_early_init(NULL);
 
