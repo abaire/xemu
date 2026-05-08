@@ -66,10 +66,10 @@ static GLuint g_tex;
 static bool g_flip_req;
 
 DebugHackerySettings g_debug_hackery_settings = {
-    .target_poll_fps = 0,
     .target_render_fps = 0,
     .yield_in_event_loop_milliseconds = 0,
     .flush_instead_of_finish = false,
+    .adaptive_ui_thread_sleep = false,
 };
 
 static void InitializeStyle()
@@ -406,10 +406,6 @@ static void apply_debug_settings(DebugHackerySettings &new_state)
     static constexpr int64_t kOneSecondNanos = 1000000000;
     g_debug_hackery_settings = new_state;
 
-    g_debug_hackery_settings.poll_frequency_ns =
-        new_state.target_poll_fps ?
-            kOneSecondNanos / static_cast<int64_t>(new_state.target_poll_fps) :
-            0;
     g_debug_hackery_settings.render_frequency_ns =
         new_state.target_render_fps ?
             kOneSecondNanos /
@@ -445,18 +441,6 @@ static void debug_hackery_overlay(void)
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::Text("Poll FPS");
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##Poll FPS", &local_state.target_poll_fps,
-                                0)) {
-                if (local_state.target_poll_fps > 600)
-                    local_state.target_poll_fps = 600;
-            }
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("UI Render FPS");
             ImGui::TableNextColumn();
             ImGui::SetNextItemWidth(60.0f);
@@ -487,18 +471,24 @@ static void debug_hackery_overlay(void)
             ImGui::Checkbox("##glFlush instead of glFinish",
                             &local_state.flush_instead_of_finish);
 
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Adaptive UI sleep");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Adaptive UI sleep",
+                            &local_state.adaptive_ui_thread_sleep);
+
             ImGui::EndTable();
         }
 
         bool is_modified =
-            (local_state.target_poll_fps !=
-             g_debug_hackery_settings.target_poll_fps) ||
             (local_state.target_render_fps !=
              g_debug_hackery_settings.target_render_fps) ||
             (local_state.yield_in_event_loop_milliseconds !=
              g_debug_hackery_settings.yield_in_event_loop_milliseconds) ||
-            (local_state.flush_instead_of_finish !=
-             g_debug_hackery_settings.flush_instead_of_finish);
+            (local_state.adaptive_ui_thread_sleep !=
+             g_debug_hackery_settings.adaptive_ui_thread_sleep);
 
         ImGui::BeginDisabled(!is_modified);
 

@@ -119,6 +119,8 @@ static QemuThread vblank_thread;
 static bool qemu_exiting;
 static int exit_status;
 
+static uint64_t target_frame_interval_ns = 0;
+
 void tcg_register_init_ctx(void); // tcg.c
 
 #if DEBUG_XEMU_C
@@ -796,6 +798,10 @@ static void report_stats(void)
 }
 #endif
 
+static int64_t last_ui_frame_time_ns = 0;
+// Reserve some time to allow SDL_GL_SwapWindow to do its work.
+static const int64_t swap_grace_period_ns = 300000;
+
 /**
  * Renders the main interface. Usually called from the main thread,
  * but may sometimes be called from another thread.
@@ -851,11 +857,7 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    if (g_debug_hackery_settings.flush_instead_of_finish) {
-        glFlush();
-    } else {
-        glFinish();
-    }
+    glFinish();
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
@@ -864,7 +866,30 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
     nv2a_release_framebuffer_surface();
+
+    if (last_ui_frame_time_ns) {
+        int64_t next_frame = 0;
+
+        if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
+            next_frame = last_ui_frame_time_ns + target_frame_interval_ns;
+        } else if (g_debug_hackery_settings.render_frequency_ns) {
+            next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
+        }
+
+        next_frame -= swap_grace_period_ns;
+
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        if (now < next_frame) {
+#if DEBUG_XEMU_C
+            last_forced_delay = next_frame - now;
+            cumulative_delay += last_forced_delay;
+#endif
+            SDL_DelayPrecise(next_frame - now);
+        }
+    }
+
     SDL_GL_SwapWindow(scon->real_window);
+    last_ui_frame_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     assert(glGetError() == GL_NO_ERROR);
 
     qatomic_set(&rendering, false);
@@ -1383,36 +1408,22 @@ int main(int argc, char **argv)
 
     struct xemu_console *scon = &scon_list[0];
     static int64_t next_frame = 0;
-    static int64_t next_poll = 0;
+    uint64_t ui_refresh_rate = 60;
+    {
+        SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
+        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
+        if (mode && mode->refresh_rate > 0) {
+            ui_refresh_rate = mode->refresh_rate;
+        }
+    }
+    target_frame_interval_ns = 1000000000ULL / ui_refresh_rate;
+
     while (!qatomic_read(&qemu_exiting)) {
-        int64_t now = 0;
-        if (g_debug_hackery_settings.render_frequency_ns > 0 ||
-            g_debug_hackery_settings.poll_frequency_ns > 0) {
-            now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-        }
+        poll_events(scon);
 
-        if (!g_debug_hackery_settings.poll_frequency_ns || now >= next_poll) {
-            poll_events(scon);
-            next_poll = now + g_debug_hackery_settings.poll_frequency_ns;
-        }
+        gl_render_frame(scon);
 
-        if (!g_debug_hackery_settings.render_frequency_ns ||
-            now >= next_frame) {
-            gl_render_frame(scon);
-            next_frame = now + g_debug_hackery_settings.render_frequency_ns;
-        }
-
-        if (g_debug_hackery_settings.render_frequency_ns > 0 &&
-            g_debug_hackery_settings.poll_frequency_ns > 0) {
-            int64_t deadline = MIN(next_poll, next_frame);
-            if (now < deadline) {
-#if DEBUG_XEMU_C
-                last_forced_delay = deadline - now;
-                cumulative_delay += last_forced_delay;
-#endif
-                SDL_DelayPrecise(deadline - now);
-            }
-        } else if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
+        if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
             SDL_Delay(
                 g_debug_hackery_settings.yield_in_event_loop_milliseconds);
         }
