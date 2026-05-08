@@ -519,7 +519,25 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
     } else if (event->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || event->type == SDL_EVENT_JOYSTICK_BUTTON_UP) {
         DPRINTF("CONTROLLER JOYSTICK BUTTON EVENT, IGNORING\n");
     } else if (event->type == SDL_EVENT_JOYSTICK_ADDED) {
-        DPRINTF("SDL_EVENT_JOYSTICK_ADDED, IGNORING\n");
+        DPRINTF("SDL_EVENT_JOYSTICK_ADDED\n");
+
+        SDL_Joystick *joystick = SDL_OpenJoystick(event->jdevice.which);
+        if (joystick) {
+            if(!SDL_IsGamepad(event->jdevice.which))
+            {
+                DPRINTF("Joystick was not a gamepad, closing %s\n", SDL_GetJoystickName(joystick));
+                SDL_CloseJoystick(joystick);
+            }
+            else
+            {
+                DPRINTF("Joystick is a gamepad, leaking reference to %s\n",
+                        SDL_GetJoystickName(joystick));
+            }
+        } else {
+            DPRINTF("Failed to open joystick %d\n", event->jdevice.which);
+        }
+
+
     } else if (event->type == SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED) {
         DPRINTF("SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED ignoring\n");
     } else if (event->type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE) {
