@@ -302,7 +302,7 @@ void xemu_input_early_init(void)
     }
 
 
-    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+    if (!SDL_InitSubSystem(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "Failed to initialize SDL gamepad subsystem: %s\n", SDL_GetError());
         exit(1);
     }
