@@ -278,7 +278,6 @@ void xemu_input_init(void)
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_LINUX_DEADZONES, "1");
 
-    SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_TRACE);
     SDL_hid_device_info *devs = SDL_hid_enumerate(0, 0);
     {
         SDL_hid_device_info *cur_dev = devs;
@@ -514,6 +513,14 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
         }
     } else if (event->type == SDL_EVENT_GAMEPAD_REMAPPED) {
         DPRINTF("Controller Remapped: %d\n", event->gdevice.which);
+    } else if (event->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || event->type == SDL_EVENT_JOYSTICK_BUTTON_UP) {
+        DPRINTF("CONTROLLER JOYSTICK BUTTON EVENT, IGNORING\n");
+    } else if (event->type == SDL_EVENT_JOYSTICK_ADDED) {
+        DPRINTF("SDL_EVENT_JOYSTICK_ADDED, IGNORING\n");
+    } else if (event->type == SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED) {
+        DPRINTF("SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED ignoring\n");
+    } else if (event->type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE) {
+        DPRINTF("SDL_EVENT_GAMEPAD_SENSOR_UPDATE ignoring\n");
     }
 }
 
