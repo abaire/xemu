@@ -278,8 +278,7 @@ void xemu_input_init(void)
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_LINUX_DEADZONES, "1");
 
-
-    SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_VERBOSE);
+    SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_TRACE);
     SDL_hid_device_info *devs = SDL_hid_enumerate(0, 0);
     {
         SDL_hid_device_info *cur_dev = devs;
