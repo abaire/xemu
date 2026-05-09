@@ -53,6 +53,7 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
@@ -846,8 +847,6 @@ static void report_stats(void)
 #endif
 
 static int64_t last_ui_frame_time_ns = 0;
-// Reserve some time to allow SDL_GL_SwapWindow to do its work.
-static const int64_t swap_grace_period_ns = 500000;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -936,12 +935,12 @@ static void gl_render_frame(struct xemu_console *scon)
     if (last_ui_frame_time_ns) {
         int64_t next_frame = 0;
 
-        if (g_debug_hackery_settings.render_frequency_ns) {
-            next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
-        } else if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
+        if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
             next_frame = last_ui_frame_time_ns + target_frame_interval_ns;
+        } else if (g_debug_hackery_settings.render_frequency_ns) {
+            next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
         }
-        next_frame -= swap_grace_period_ns;
+        next_frame -= (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
 
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         if (now < next_frame) {
@@ -953,9 +952,19 @@ static void gl_render_frame(struct xemu_console *scon)
         }
     }
 
+    int64_t swap_start = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     SDL_GL_SwapWindow(scon->real_window);
     last_ui_frame_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     assert(glGetError() == GL_NO_ERROR);
+
+    // DONOTSUBMIT: Track UI level dropped frames, which may hold the guest
+    // graphics rendering as well.
+    int64_t swap_time = last_ui_frame_time_ns - swap_start;
+    if (swap_time >= target_frame_interval_ns) {
+        nv2a_profile_inc_counter(NV2A_PROF_UI_LONG_SWAPS);
+    }
+    nv2a_profile_inc_counter(NV2A_PROF_UI_SWAPS);
+
 
     if (g_debug_hackery_settings.fence_sync) {
         frame_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -1339,7 +1348,7 @@ static const wchar_t *get_executable_name(void)
             return NULL;
         }
 
-        wchar_t *last_slash = wcsrchr(full_path, L'\\');
+        wchar_t *last_slash =  wcsrchr(full_path, L'\\');
         if (last_slash) {
             wcsncpy_s(exe_name, MAX_PATH, last_slash + 1, _TRUNCATE);
         } else {
@@ -1476,10 +1485,10 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
-    static int64_t next_frame = 0;
 
     uint64_t ui_refresh_rate = 60;
     {
+        // TODO: Handle external changes to display / displaymode.
         SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
         const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
         if (mode && mode->refresh_rate > 0) {

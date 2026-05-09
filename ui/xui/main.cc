@@ -66,13 +66,13 @@ static GLuint g_tex;
 static bool g_flip_req;
 
 DebugHackerySettings g_debug_hackery_settings = {
-    .target_poll_fps = 0,
     .target_render_fps = 0,
     .yield_in_event_loop_milliseconds = 0,
     .flush_instead_of_finish = false,
     .fence_sync = false,
     .limit_framebuffer_fetches_to_guest_vblank = false,
     .adaptive_ui_thread_sleep = false,
+    .ui_throttle_swap_grace_period_microseconds = 500,
 };
 
 static void InitializeStyle()
@@ -409,10 +409,6 @@ static void apply_debug_settings(DebugHackerySettings &new_state)
     static constexpr int64_t kOneSecondNanos = 1000000000;
     g_debug_hackery_settings = new_state;
 
-    g_debug_hackery_settings.poll_frequency_ns =
-        new_state.target_poll_fps ?
-            kOneSecondNanos / static_cast<int64_t>(new_state.target_poll_fps) :
-            0;
     g_debug_hackery_settings.render_frequency_ns =
         new_state.target_render_fps ?
             kOneSecondNanos /
@@ -445,28 +441,46 @@ static void debug_hackery_overlay(void)
         ImGui::Separator();
 
         if (ImGui::BeginTable("##hackery_table", 2)) {
-//            ImGui::TableNextRow();
-//            ImGui::TableNextColumn();
-//            ImGui::AlignTextToFramePadding();
-//            ImGui::Text("Poll FPS");
-//            ImGui::TableNextColumn();
-//            ImGui::SetNextItemWidth(60.0f);
-//            if (ImGui::InputInt("##Poll FPS", &local_state.target_poll_fps,
-//                                0)) {
-//                if (local_state.target_poll_fps > 600)
-//                    local_state.target_poll_fps = 600;
-//            }
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Adaptive UI sleep");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Adaptive UI sleep",
+                            &local_state.adaptive_ui_thread_sleep);
 
+            if (local_state.adaptive_ui_thread_sleep) {
+                ImGui::BeginDisabled();
+            }
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
             ImGui::Text("UI Render FPS");
             ImGui::TableNextColumn();
             ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##UI Render FPS", &local_state.target_render_fps,
-                                0)) {
+            if (ImGui::InputInt("##UI Render FPS",
+                                &local_state.target_render_fps, 0)) {
                 if (local_state.target_render_fps > 600)
                     local_state.target_render_fps = 600;
+            }
+            if (local_state.adaptive_ui_thread_sleep) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("UI throttle grace period (us)");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt(
+                    "##UI throttle grace period (us)",
+                    &local_state.ui_throttle_swap_grace_period_microseconds,
+                    0)) {
+                if (local_state.ui_throttle_swap_grace_period_microseconds >
+                    16000)
+                    local_state.ui_throttle_swap_grace_period_microseconds =
+                        16000;
             }
 
             ImGui::TableNextRow();
@@ -506,20 +520,12 @@ static void debug_hackery_overlay(void)
             ImGui::Checkbox("##Limit guest fb fetch",
                             &local_state.limit_framebuffer_fetches_to_guest_vblank);
 
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("Adaptive UI sleep");
-            ImGui::TableNextColumn();
-            ImGui::Checkbox("##Adaptive UI sleep",
-                            &local_state.adaptive_ui_thread_sleep);
-
             ImGui::EndTable();
         }
 
         bool is_modified =
-            (local_state.target_poll_fps !=
-             g_debug_hackery_settings.target_poll_fps) ||
+            (local_state.ui_throttle_swap_grace_period_microseconds !=
+             g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds) ||
             (local_state.target_render_fps !=
              g_debug_hackery_settings.target_render_fps) ||
             (local_state.yield_in_event_loop_milliseconds !=
