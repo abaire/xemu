@@ -814,7 +814,6 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
 
-        // Legend
         int last_frame_idx =
             (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
             NV2A_PROF_NUM_FRAMES;
@@ -833,13 +832,10 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
             bool enabled = m_timing_visible[idx];
             bool hovered = (m_hovered_accumulator_index == idx);
 
-            ImVec4 text_col;
-            if (enabled) {
-                text_col = hovered ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) :
-                                     ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
-            } else {
-                text_col = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
-            }
+            ImVec4 text_col = enabled ?
+                                  (hovered ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) :
+                                             ImVec4(0.8f, 0.8f, 0.8f, 1.0f)) :
+                                  ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
 
             int depth = 0;
             if (!is_mspf) {
@@ -865,21 +861,24 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
             }
 
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + swatch_size +
-                                 spacing + depth * 15.0f * g_viewport_mgr.m_scale);
+                                 spacing +
+                                 depth * 15.0f * g_viewport_mgr.m_scale);
 
-            std::string display_name = name;
-            auto pos = display_name.rfind("__");
-            if (pos != std::string::npos) {
-                display_name = display_name.substr(pos + 2);
+            std::string_view display_name(name);
+            size_t pos = display_name.rfind("__");
+            if (pos != std::string_view::npos) {
+                display_name.remove_prefix(pos + 2);
             }
 
             ImGui::PushStyleColor(ImGuiCol_Text, text_col);
             char buf[256];
             if (is_mspf) {
-                snprintf(buf, sizeof(buf), "%s: %d ms###LgndT%d", display_name.c_str(), total,
+                snprintf(buf, sizeof(buf), "%.*s: %d ms###LgndT%d",
+                         (int)display_name.length(), display_name.data(), total,
                          idx);
             } else {
-                snprintf(buf, sizeof(buf), "%s: %d : %d###LgndT%d", display_name.c_str(), total,
+                snprintf(buf, sizeof(buf), "%.*s: %d : %d###LgndT%d",
+                         (int)display_name.length(), display_name.data(), total,
                          events, idx);
             }
 
@@ -902,34 +901,53 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
 
         DrawLegendItem(INDEX_TIMING_MSPF, "MSPF", last_frame.mspf, 0, true);
 
-        std::vector<int> sorted_indices;
-        std::function<void(int)> add_node = [&](int node) {
-            sorted_indices.push_back(node);
-            
-            std::vector<int> children;
-            for (int i = 0; i < nv2a_debug::kAccumulatorTree[node].num_children; ++i) {
-                children.push_back(nv2a_debug::kAccumulatorTree[node].children[i]);
+        static std::vector<int> sorted_indices;
+        static int frames_until_resort = 0;
+        if (frames_until_resort) {
+            --frames_until_resort;
+        } else {
+            frames_until_resort = 30;
+            sorted_indices.clear();
+
+            std::function<void(int)> add_node = [&](int node) {
+                sorted_indices.push_back(node);
+
+                int num_children =
+                    nv2a_debug::kAccumulatorTree[node].num_children;
+                if (num_children == 0)
+                    return;
+
+                int children[NV2A_PROF_ACCUMULATORS__COUNT];
+                for (int i = 0; i < num_children; ++i) {
+                    children[i] =
+                        nv2a_debug::kAccumulatorTree[node].children[i];
+                }
+
+                std::sort(children, children + num_children, [&](int a, int b) {
+                    return last_frame.accumulators[a].total >
+                           last_frame.accumulators[b].total;
+                });
+
+                for (int i = 0; i < num_children; ++i) {
+                    add_node(children[i]);
+                }
+            };
+
+            std::vector<int> roots;
+            roots.reserve(NV2A_PROF_ACCUMULATORS__COUNT);
+            for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+                if (nv2a_debug::kAccumulatorTree[i].parent_index == -1) {
+                    roots.push_back(i);
+                }
             }
-            std::sort(children.begin(), children.end(), [&](int a, int b) {
-                return last_frame.accumulators[a].total > last_frame.accumulators[b].total;
+            std::sort(roots.begin(), roots.end(), [&](int a, int b) {
+                return last_frame.accumulators[a].total >
+                       last_frame.accumulators[b].total;
             });
-            for (int child : children) {
-                add_node(child);
-            }
-        };
 
-        std::vector<int> roots;
-        for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
-            if (nv2a_debug::kAccumulatorTree[i].parent_index == -1) {
-                roots.push_back(i);
+            for (int root : roots) {
+                add_node(root);
             }
-        }
-        std::sort(roots.begin(), roots.end(), [&](int a, int b) {
-            return last_frame.accumulators[a].total > last_frame.accumulators[b].total;
-        });
-
-        for (int root : roots) {
-            add_node(root);
         }
 
         for (int i : sorted_indices) {
@@ -943,7 +961,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
         ImGui::EndChild();
 
         ImGui::TableNextColumn();
-        // Plot
+
         if (ImPlot::BeginPlot("##FrameTimingBreakdownPlot",
                               ImVec2(-1, 300 * g_viewport_mgr.m_scale),
                               ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend)) {
@@ -959,8 +977,25 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                                       new_hovered_accumulator_index :
                                       m_hovered_accumulator_index;
 
+            static double precalc_y1[NV2A_PROF_NUM_FRAMES]
+                                    [NV2A_PROF_ACCUMULATORS__COUNT];
+            static double precalc_y2[NV2A_PROF_NUM_FRAMES]
+                                    [NV2A_PROF_ACCUMULATORS__COUNT];
+
+            for (int frame = 0; frame < NV2A_PROF_NUM_FRAMES; ++frame) {
+                int real_idx =
+                    (g_nv2a_stats.frame_ptr + frame) % NV2A_PROF_NUM_FRAMES;
+                double sum = 0;
+                for (int i = 0; i < NV2A_PROF_ACCUMULATORS__COUNT; ++i) {
+                    precalc_y1[frame][i] = sum;
+                    if (m_timing_visible[i]) {
+                        sum += GetAccumulatorOwnValue(i, real_idx);
+                    }
+                    precalc_y2[frame][i] = sum;
+                }
+            }
+
             struct PlotContext {
-                DebugVideoWindow *window;
                 int i;
             };
 
@@ -970,42 +1005,31 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                 }
 
                 static PlotContext ctx[NV2A_PROF_ACCUMULATORS__COUNT];
-                ctx[i] = { this, i };
+                ctx[i] = { i };
 
                 const char *name = nv2a_profile_get_accumulator_name(
                     (NV2A_PROF_ACCUMULATORS_ENUM)i);
-                float alpha = (effective_hover != -1 && IsDescendantOrSelf(effective_hover, i)) ? 0.8f : 0.25f;
+                float alpha = (effective_hover != -1 &&
+                               IsDescendantOrSelf(effective_hover, i)) ?
+                                  0.8f :
+                                  0.25f;
                 ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, alpha);
                 ImPlot::PushStyleColor(ImPlotCol_Fill,
                                        ImPlot::GetColormapColor(i));
+
                 ImPlot::PlotShadedG(
                     name,
                     [](int idx, void *data) -> ImPlotPoint {
-                        PlotContext *c = (PlotContext *)data;
-                        int frame_idx = (g_nv2a_stats.frame_ptr + idx) %
-                                        NV2A_PROF_NUM_FRAMES;
-                        double sum = 0;
-                        for (int k = 0; k <= c->i; ++k) {
-                            if (c->window->m_timing_visible[k]) {
-                                sum += c->window->GetAccumulatorOwnValue(k, frame_idx);
-                            }
-                        }
-                        return ImPlotPoint(idx, sum);
+                        return ImPlotPoint(
+                            idx, precalc_y2[idx][((PlotContext *)data)->i]);
                     },
                     &ctx[i],
                     [](int idx, void *data) -> ImPlotPoint {
-                        PlotContext *c = (PlotContext *)data;
-                        int frame_idx = (g_nv2a_stats.frame_ptr + idx) %
-                                        NV2A_PROF_NUM_FRAMES;
-                        double sum = 0;
-                        for (int k = 0; k < c->i; ++k) {
-                            if (c->window->m_timing_visible[k]) {
-                                sum += c->window->GetAccumulatorOwnValue(k, frame_idx);
-                            }
-                        }
-                        return ImPlotPoint(idx, sum);
+                        return ImPlotPoint(
+                            idx, precalc_y1[idx][((PlotContext *)data)->i]);
                     },
                     &ctx[i], NV2A_PROF_NUM_FRAMES);
+
                 ImPlot::PopStyleColor();
                 ImPlot::PopStyleVar();
             }
