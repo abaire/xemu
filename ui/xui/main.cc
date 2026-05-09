@@ -67,9 +67,8 @@ static bool g_flip_req;
 
 DebugHackerySettings g_debug_hackery_settings = {
     .target_render_fps = 0,
-    .yield_in_event_loop_milliseconds = 0,
-    .flush_instead_of_finish = false,
     .adaptive_ui_thread_sleep = false,
+    .ui_throttle_swap_grace_period_microseconds = 300,
 };
 
 static void InitializeStyle()
@@ -441,52 +440,55 @@ static void debug_hackery_overlay(void)
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::Text("UI Render FPS");
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##UI Render FPS", &local_state.target_render_fps,
-                                0)) {
-                if (local_state.target_render_fps > 600)
-                    local_state.target_render_fps = 600;
-            }
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("Yield ms");
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##Yield ms",
-                                &local_state.yield_in_event_loop_milliseconds,
-                                0)) {
-                if (local_state.yield_in_event_loop_milliseconds > 66)
-                    local_state.yield_in_event_loop_milliseconds = 66;
-            }
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("glFlush instead of glFinish");
-            ImGui::TableNextColumn();
-            ImGui::Checkbox("##glFlush instead of glFinish",
-                            &local_state.flush_instead_of_finish);
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("Adaptive UI sleep");
             ImGui::TableNextColumn();
             ImGui::Checkbox("##Adaptive UI sleep",
                             &local_state.adaptive_ui_thread_sleep);
+            if (local_state.adaptive_ui_thread_sleep) {
+                ImGui::BeginDisabled();
+            }
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("UI Render FPS");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt("##UI Render FPS",
+                                &local_state.target_render_fps, 0)) {
+                if (local_state.target_render_fps > 600)
+                    local_state.target_render_fps = 600;
+            }
+            if (local_state.adaptive_ui_thread_sleep) {
+                ImGui::EndDisabled();
+            }
 
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("UI throttle grace period (us)");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt(
+                    "##UI throttle grace period (us)",
+                    &local_state.ui_throttle_swap_grace_period_microseconds,
+                    0)) {
+                if (local_state.ui_throttle_swap_grace_period_microseconds >
+                    16000)
+                    local_state.ui_throttle_swap_grace_period_microseconds =
+                        16000;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
             ImGui::EndTable();
         }
 
         bool is_modified =
+            (local_state.ui_throttle_swap_grace_period_microseconds !=
+             g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds) ||
             (local_state.target_render_fps !=
              g_debug_hackery_settings.target_render_fps) ||
-            (local_state.yield_in_event_loop_milliseconds !=
-             g_debug_hackery_settings.yield_in_event_loop_milliseconds) ||
             (local_state.adaptive_ui_thread_sleep !=
              g_debug_hackery_settings.adaptive_ui_thread_sleep);
 

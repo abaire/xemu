@@ -119,8 +119,6 @@ static QemuThread vblank_thread;
 static bool qemu_exiting;
 static int exit_status;
 
-static uint64_t target_frame_interval_ns = 0;
-
 void tcg_register_init_ctx(void); // tcg.c
 
 #if DEBUG_XEMU_C
@@ -799,8 +797,7 @@ static void report_stats(void)
 #endif
 
 static int64_t last_ui_frame_time_ns = 0;
-// Reserve some time to allow SDL_GL_SwapWindow to do its work.
-static const int64_t swap_grace_period_ns = 300000;
+static int64_t display_vsync_interval = 1000000000LL / 60;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -867,16 +864,15 @@ static void gl_render_frame(struct xemu_console *scon)
 
     nv2a_release_framebuffer_surface();
 
-    if (last_ui_frame_time_ns) {
+    if (g_config.display.window.vsync && last_ui_frame_time_ns) {
         int64_t next_frame = 0;
 
         if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
-            next_frame = last_ui_frame_time_ns + target_frame_interval_ns;
+            next_frame = last_ui_frame_time_ns + display_vsync_interval;
         } else if (g_debug_hackery_settings.render_frequency_ns) {
             next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
         }
-
-        next_frame -= swap_grace_period_ns;
+        next_frame -= (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
 
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         if (now < next_frame) {
@@ -899,6 +895,26 @@ static void gl_render_frame(struct xemu_console *scon)
 #endif
 }
 
+static void calculate_vsync_interval_ns(void)
+{
+    SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
+    if (mode && mode->refresh_rate_numerator > 0 &&
+        mode->refresh_rate_denominator > 0) {
+        display_vsync_interval =
+            (1000000000LL * mode->refresh_rate_denominator) /
+            mode->refresh_rate_numerator;
+        return;
+    }
+
+    if (mode && mode->refresh_rate > 0) {
+        display_vsync_interval = (int64_t)(1000000000.0 / mode->refresh_rate);
+        return;
+    }
+
+    display_vsync_interval = 1000000000LL / 60;
+}
+
 static bool event_watch_callback(void *userdata, SDL_Event *event)
 {
     struct xemu_console *scon = (struct xemu_console *)userdata;
@@ -906,6 +922,9 @@ static bool event_watch_callback(void *userdata, SDL_Event *event)
     if (event->type == SDL_EVENT_WINDOW_EXPOSED ||
         event->type == SDL_EVENT_WINDOW_RESIZED) {
         gl_render_frame(scon);
+    } else if (event->type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED ||
+               event->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
+        calculate_vsync_interval_ns();
     }
 
     return true; // Ignored
@@ -1407,26 +1426,12 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
-    static int64_t next_frame = 0;
-    uint64_t ui_refresh_rate = 60;
-    {
-        SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
-        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
-        if (mode && mode->refresh_rate > 0) {
-            ui_refresh_rate = mode->refresh_rate;
-        }
-    }
-    target_frame_interval_ns = 1000000000ULL / ui_refresh_rate;
+    calculate_vsync_interval_ns();
 
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
 
         gl_render_frame(scon);
-
-        if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
-            SDL_Delay(
-                g_debug_hackery_settings.yield_in_event_loop_milliseconds);
-        }
 
 #if DEBUG_XEMU_C
         ++event_loops_since_update;
