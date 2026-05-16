@@ -561,8 +561,8 @@ static void fps_overlay()
 
     if (calculated_width == 0.0f) {
         ImGui::PushFont(g_font_mgr.m_fixed_width_font);
-        calculated_width = ImGui::CalcTextSize(header_text).x +
-                           (ImGui::GetStyle().WindowPadding.x * 2.0f);
+        calculated_width = ceilf(ImGui::CalcTextSize(header_text).x * 1.5f +
+                                 (ImGui::GetStyle().WindowPadding.x * 2.0f));
         ImGui::PopFont();
     }
 
