@@ -67,9 +67,9 @@ static bool g_flip_req;
 
 DebugHackerySettings g_debug_hackery_settings = {
     .target_render_fps = 0,
-    .adaptive_ui_thread_sleep = false,
+    .adaptive_ui_thread_sleep = true,
     .ui_throttle_swap_grace_period_microseconds = 300,
-    .enable_adaptive_vsync_if_vsync_enabled = false,
+    .enable_adaptive_vsync_if_vsync_enabled = true,
 };
 
 DebugHackeryProfileInfo g_debug_hackery_profile_info = {0};
