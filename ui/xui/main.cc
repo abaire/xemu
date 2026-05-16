@@ -71,6 +71,8 @@ DebugHackerySettings g_debug_hackery_settings = {
     .ui_throttle_swap_grace_period_microseconds = 300,
 };
 
+DebugHackeryProfileInfo g_debug_hackery_profile_info = {0};
+
 static void InitializeStyle()
 {
     g_font_mgr.Rebuild();
@@ -508,29 +510,64 @@ static void debug_hackery_overlay(void)
     ImGui::End();
 }
 
-extern "C" int64_t slept_frames;
-extern "C" int64_t nowait_frames;
-extern "C" int64_t last_frame_swap_time;
-extern "C" int64_t out_of_time_frames;
+extern "C" volatile int g_guest_fps;
 
 static void fps_overlay()
 {
-    ImGuiIO& io = ImGui::GetIO();
-    ImGuiWindowFlags fps_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGuiIO &io = ImGui::GetIO();
+
+    ImGuiWindowFlags fps_window_flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove;
+
+    static float calculated_width = 0.0f;
+    static const char *header_text =
+        " -- FPS ----------------------------------------- ";
+
+    if (calculated_width == 0.0f) {
+        ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+        calculated_width = ImGui::CalcTextSize(header_text).x +
+                           (ImGui::GetStyle().WindowPadding.x * 2.0f);
+        ImGui::PopFont();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(calculated_width, 0.0f));
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.7f);
+
+    static char data[1024] = "";
+
+    static int frame_counter = 0;
+    if (frame_counter++ % 10 == 0) {
+        snprintf(data, sizeof(data),
+                 "UI FPS: %.1f\n"
+                 "Guest FPS: %d\n"
+                 "Resyncs               : %10lld\n"
+                 "Last frm drv swap (us): %10lld\n"
+                 "Last frm total (us)   : %10lld\n"
+                 "Last app slp (ns)     : %10lld\n"
+                 "Out of time pauses    : %10lld\n"
+                 "app delayed frames    : %10lld\n"
+                 "driver delayed frames : %10lld",
+                 io.Framerate,
+                 g_guest_fps,
+                 g_debug_hackery_profile_info.sleep_resyncs,
+                 g_debug_hackery_profile_info.last_frame_swap_time / 1000,
+                 g_debug_hackery_profile_info.last_frame_total_time / 1000,
+                 g_debug_hackery_profile_info.last_sleep_time_ns,
+                 g_debug_hackery_profile_info.out_of_time_frames,
+                 g_debug_hackery_profile_info.slept_frames,
+                 g_debug_hackery_profile_info.nowait_frames
+        );
+    }
+
     if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
-        ImGui::Text(" -- Frame rate info -------------------------- ");
-        ImGui::Text("UI FPS: %.1f", io.Framerate);
-        ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
-
-        ImGui::Text("Last frm drv swap (us): %-10lld", last_frame_swap_time / 1000);
-        ImGui::Text("Out of time pauses: %lld", out_of_time_frames);
-
-        ImGui::Text("app delayed frames: %lld", slept_frames);
-        ImGui::Text("driver delayed frames: %lld", nowait_frames);
+        ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+//        ImGui::TextUnformatted(header_text);
+        ImGui::TextUnformatted(data);
+        ImGui::PopFont();
     }
     ImGui::End();
 }
@@ -538,7 +575,7 @@ static void fps_overlay()
 void xemu_hud_render()
 {
     fps_overlay();
-    host_vsync_test();
+//    host_vsync_test();
     debug_hackery_overlay();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

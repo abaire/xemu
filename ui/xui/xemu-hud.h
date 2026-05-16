@@ -40,6 +40,18 @@ typedef struct DebugHackerySettings {
 
 extern DebugHackerySettings g_debug_hackery_settings;
 
+typedef struct DebugHackeryProfileInfo {
+    int64_t sleep_resyncs;
+    int64_t slept_frames;
+    int64_t nowait_frames;
+    int64_t last_frame_swap_time;
+    int64_t out_of_time_frames;
+    int64_t last_frame_total_time;
+    int64_t last_sleep_time_ns;
+} DebugHackeryProfileInfo;
+
+extern DebugHackeryProfileInfo g_debug_hackery_profile_info;
+
 // Implemented in xemu.c
 int xemu_is_fullscreen(void);
 void xemu_toggle_fullscreen(void);

@@ -798,11 +798,7 @@ static void report_stats(void)
 
 static int64_t last_ui_frame_time_ns = 0;
 static int64_t display_vsync_interval = 1000000000LL / 60;
-
-int64_t slept_frames = 0;
-int64_t nowait_frames = 0;
-int64_t last_frame_swap_time = 0;
-int64_t out_of_time_frames = 0;
+static int64_t next_vblank_target_ns = 0;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -820,23 +816,12 @@ static void gl_render_frame(struct xemu_console *scon)
     bool flip_required = false;
     bool release_surface_texture = false;
 
-    /* XXX: Note that this bypasses the usual VGA path in order to quickly
-     * get the surface. This is simple and fast, at the cost of accuracy.
-     * Ideally, this should go through the VGA code and opportunistically pull
-     * the surface like this, but handle the VGA logic as well. For now, just
-     * use this fast path to handle the common case.
-     *
-     * In the event the surface is not found in the surface cache, e.g. when
-     * the guest code isn't using HW accelerated rendering, but just blitting
-     * to the framebuffer, fall back to the VGA path.
-     */
     GLuint tex = nv2a_get_framebuffer_surface();
 
     assert(glGetError() == GL_NO_ERROR);
 
     if (tex == 0) {
         xemu_main_loop_lock();
-        // FIXME: Don't upload if notdirty
         xb_surface_gl_create_texture(scon->surface);
         tex = scon->surface->texture;
         flip_required = true;
@@ -849,11 +834,6 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_snapshots_set_framebuffer_texture(tex, flip_required);
     xemu_hud_set_framebuffer_texture(tex, flip_required);
 
-    /* FIXME: Finer locking. Event handlers in segments of the code expect
-     * to be running on the main thread with the BQL. For now, acquire the
-     * lock and perform rendering, but release before swap to avoid
-     * possible lengthy blocking (for vsync).
-     */
     xemu_main_loop_lock();
     xemu_hud_update();
     xemu_main_loop_unlock();
@@ -869,40 +849,66 @@ static void gl_render_frame(struct xemu_console *scon)
 
     nv2a_release_framebuffer_surface();
 
-    if (g_config.display.window.vsync && last_ui_frame_time_ns) {
-        int64_t next_frame = 0;
-
+    int64_t interval = 0;
+    if (g_config.display.window.vsync && display_vsync_interval) {
         if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
-            next_frame = last_ui_frame_time_ns + display_vsync_interval;
+            interval = display_vsync_interval;
         } else if (g_debug_hackery_settings.render_frequency_ns) {
-            next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
+            interval = g_debug_hackery_settings.render_frequency_ns;
         }
-        int64_t grace_period = (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
-        if (next_frame && next_frame < grace_period) {
-            ++out_of_time_frames;
-        }
-
-        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-        if (next_frame > grace_period && now < (next_frame - grace_period)) {
-#if DEBUG_XEMU_C
-            last_forced_delay = next_frame - now;
-            cumulative_delay += last_forced_delay;
-#endif
-            SDL_DelayPrecise(next_frame - now);
-            ++slept_frames;
-        } else {
-            ++nowait_frames;
-        }
-    } else {
-        ++nowait_frames;
     }
 
-    int64_t swap_start = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    SDL_GL_SwapWindow(scon->real_window);
-    last_ui_frame_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    assert(glGetError() == GL_NO_ERROR);
+    if (interval) {
+        int64_t now = SDL_GetTicksNS();
 
-    last_frame_swap_time = last_ui_frame_time_ns - swap_start;
+        // Initialize target, or resync if a massive stall occurred (e.g. dragging window)
+        if (next_vblank_target_ns == 0 || now > next_vblank_target_ns + interval * 10) {
+            next_vblank_target_ns = now + interval;
+            ++g_debug_hackery_profile_info.sleep_resyncs;
+        }
+
+        int64_t grace_period = (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
+        int64_t time_until_target = next_vblank_target_ns - now;
+
+        g_debug_hackery_profile_info.last_sleep_time_ns = time_until_target;
+
+        if (time_until_target < grace_period) {
+            ++g_debug_hackery_profile_info.out_of_time_frames;
+        }
+
+        if (time_until_target > grace_period) {
+            int64_t sleep_ns = time_until_target - grace_period;
+#if DEBUG_XEMU_C
+            last_forced_delay = sleep_ns;
+            cumulative_delay += sleep_ns;
+#endif
+            SDL_DelayPrecise(sleep_ns);
+            ++g_debug_hackery_profile_info.slept_frames;
+        } else {
+            ++g_debug_hackery_profile_info.nowait_frames;
+        }
+    } else {
+        ++g_debug_hackery_profile_info.nowait_frames;
+    }
+
+    int64_t swap_start = SDL_GetTicksNS();
+    SDL_GL_SwapWindow(scon->real_window);
+    int64_t swap_finish = SDL_GetTicksNS();
+
+    g_debug_hackery_profile_info.last_frame_swap_time = swap_finish - swap_start;
+    g_debug_hackery_profile_info.last_frame_total_time = swap_finish - last_ui_frame_time_ns;
+    last_ui_frame_time_ns = swap_finish;
+
+    if (interval) {
+        // Unconditionally advance the target by a perfect interval interval.
+        next_vblank_target_ns += interval;
+
+        // Fast-forward only if the thread slept through an entire frame cycle.
+        // This maintains the modulo phase lock while guaranteeing next target is in the future.
+        while (next_vblank_target_ns <= swap_finish) {
+            next_vblank_target_ns += interval;
+        }
+    }
 
     qatomic_set(&rendering, false);
 
@@ -921,7 +927,7 @@ static void calculate_vsync_interval_ns(void)
             (1000000000LL * mode->refresh_rate_denominator) /
             mode->refresh_rate_numerator;
 
-        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%lld /%lld)\n", display_vsync_interval, mode->refresh_rate_denominator, mode->refresh_rate_numerator);
+        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%d / %d)\n", display_vsync_interval, mode->refresh_rate_denominator, mode->refresh_rate_numerator);
         return;
     }
 

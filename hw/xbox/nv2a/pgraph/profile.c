@@ -21,6 +21,8 @@
 
 NV2AStats g_nv2a_stats;
 
+volatile int g_guest_fps = 0;
+
 void nv2a_profile_increment(void)
 {
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
@@ -34,6 +36,7 @@ void nv2a_profile_increment(void)
     int64_t delta = now - ts;
     if (delta >= fps_update_interval) {
         g_nv2a_stats.increment_fps = frame_count * 1000000 / delta;
+        g_guest_fps = g_nv2a_stats.increment_fps;
         ts = now;
         frame_count = 0;
     }
