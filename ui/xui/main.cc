@@ -70,6 +70,7 @@ DebugHackerySettings g_debug_hackery_settings = {
     .adaptive_ui_thread_sleep = true,
     .ui_throttle_swap_grace_period_microseconds = 300,
     .enable_adaptive_vsync_if_vsync_enabled = true,
+    .missed_frame_resync_interval = 8,
 };
 
 DebugHackeryProfileInfo g_debug_hackery_profile_info = {0};
@@ -476,8 +477,9 @@ static void debug_hackery_overlay(void)
                 ImGui::SetNextItemWidth(60.0f);
                 if (ImGui::InputInt("##UI Render FPS",
                                     &local_state.target_render_fps, 0)) {
-                    if (local_state.target_render_fps > 600)
+                    if (local_state.target_render_fps > 600) {
                         local_state.target_render_fps = 600;
+                    }
                 }
 
                 if (local_state.adaptive_ui_thread_sleep) {
@@ -496,9 +498,10 @@ static void debug_hackery_overlay(void)
                     &local_state.ui_throttle_swap_grace_period_microseconds,
                     0)) {
                 if (local_state.ui_throttle_swap_grace_period_microseconds >
-                    16000)
+                    16000) {
                     local_state.ui_throttle_swap_grace_period_microseconds =
                         16000;
+                }
             }
 
 
@@ -509,6 +512,21 @@ static void debug_hackery_overlay(void)
             ImGui::TableNextColumn();
             ImGui::Checkbox("##Allow tearing on late swaps",
                             &local_state.enable_adaptive_vsync_if_vsync_enabled);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Missed frames to trigger resync");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt(
+                    "##Missed frames to trigger resync",
+                    &local_state.missed_frame_resync_interval,
+                    0)) {
+                if (local_state.missed_frame_resync_interval > 10) {
+                    local_state.missed_frame_resync_interval = 10;
+                }
+            }
 
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -525,7 +543,9 @@ static void debug_hackery_overlay(void)
             (local_state.adaptive_ui_thread_sleep !=
              g_debug_hackery_settings.adaptive_ui_thread_sleep) ||
             (local_state.enable_adaptive_vsync_if_vsync_enabled !=
-             g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled);
+             g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled) ||
+            (local_state.missed_frame_resync_interval !=
+             g_debug_hackery_settings.missed_frame_resync_interval);
 
         ImGui::BeginDisabled(!is_modified);
 

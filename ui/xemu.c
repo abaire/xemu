@@ -852,7 +852,7 @@ static inline void present_frame(struct xemu_console *scon)
     if (interval) {
         // 1. Hard Phase Anchor (only for initialization or massive stalls)
         if (next_vblank_target_ns == 0 ||
-            swap_finish > next_vblank_target_ns + interval * 10) {
+            swap_finish > next_vblank_target_ns + interval * g_debug_hackery_settings.missed_frame_resync_interval) {
             next_vblank_target_ns = swap_finish + interval;
             ++g_debug_hackery_profile_info.sleep_resyncs;
         } else {
