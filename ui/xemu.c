@@ -799,6 +799,9 @@ static void report_stats(void)
 static int64_t last_ui_frame_time_ns = 0;
 static int64_t display_vsync_interval = 1000000000LL / 60;
 
+int64_t slept_frames = 0;
+int64_t nowait_frames = 0;
+
 /**
  * Renders the main interface. Usually called from the main thread,
  * but may sometimes be called from another thread.
@@ -881,7 +884,12 @@ static void gl_render_frame(struct xemu_console *scon)
             cumulative_delay += last_forced_delay;
 #endif
             SDL_DelayPrecise(next_frame - now);
+            ++slept_frames;
+        } else {
+            ++nowait_frames;
         }
+    } else {
+        ++nowait_frames;
     }
 
     SDL_GL_SwapWindow(scon->real_window);
@@ -904,15 +912,19 @@ static void calculate_vsync_interval_ns(void)
         display_vsync_interval =
             (1000000000LL * mode->refresh_rate_denominator) /
             mode->refresh_rate_numerator;
+
+        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%lld /%lld)\n", display_vsync_interval, mode->refresh_rate_denominator, mode->refresh_rate_numerator);
         return;
     }
 
     if (mode && mode->refresh_rate > 0) {
         display_vsync_interval = (int64_t)(1000000000.0 / mode->refresh_rate);
+        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%f)\n", display_vsync_interval, mode->refresh_rate);
         return;
     }
 
     display_vsync_interval = 1000000000LL / 60;
+    fprintf(stderr, "calculate_vsync_interval_ns: failed to calculate actual interval, using 60fps\n");
 }
 
 static bool event_watch_callback(void *userdata, SDL_Event *event)
@@ -1148,9 +1160,9 @@ static void display_early_init(DisplayOptions *o)
 
     if (!interval) {
         SDL_GL_SetSwapInterval(0);
-    } else if (SDL_GL_SetSwapInterval(-1)) {
+    } /*else if (SDL_GL_SetSwapInterval(-1)) {
         fprintf(stderr, "VSYNC adaptive\n");
-    } else if (!SDL_GL_SetSwapInterval(1)) {
+    }*/ else if (!SDL_GL_SetSwapInterval(1)) {
         fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
                 SDL_GetError());
     }

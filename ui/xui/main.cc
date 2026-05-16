@@ -508,6 +508,9 @@ static void debug_hackery_overlay(void)
     ImGui::End();
 }
 
+extern "C" int64_t slept_frames;
+extern "C" int64_t nowait_frames;
+
 static void fps_overlay()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -519,6 +522,9 @@ static void fps_overlay()
     if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
         ImGui::Text("UI FPS: %.1f", io.Framerate);
         ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
+
+        ImGui::Text("app delayed frames: %lld", slept_frames);
+        ImGui::Text("driver delayed frames: %lld", nowait_frames);
     }
     ImGui::End();
 }
@@ -536,9 +542,9 @@ void xemu_hud_render()
 
         if (!g_vsync) {
             SDL_GL_SetSwapInterval(0);
-        } else if (SDL_GL_SetSwapInterval(-1)) {
+        } /*else if (SDL_GL_SetSwapInterval(-1)) {
             fprintf(stderr, "VSYNC adaptive\n");
-        } else if (!SDL_GL_SetSwapInterval(1)) {
+        } */else if (!SDL_GL_SetSwapInterval(1)) {
             fprintf(stderr, "Failed to set swap interval to 1. %s\n",
                     SDL_GetError());
         }
