@@ -34,6 +34,7 @@ typedef struct DebugHackerySettings {
     int target_render_fps;
     bool adaptive_ui_thread_sleep;
     int ui_throttle_swap_grace_period_microseconds;
+    bool enable_adaptive_vsync_if_vsync_enabled;
 
     int64_t render_frequency_ns;
 } DebugHackerySettings;

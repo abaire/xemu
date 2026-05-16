@@ -69,6 +69,7 @@ DebugHackerySettings g_debug_hackery_settings = {
     .target_render_fps = 0,
     .adaptive_ui_thread_sleep = false,
     .ui_throttle_swap_grace_period_microseconds = 300,
+    .enable_adaptive_vsync_if_vsync_enabled = false,
 };
 
 DebugHackeryProfileInfo g_debug_hackery_profile_info = {0};
@@ -405,6 +406,8 @@ static void host_vsync_test()
 static void apply_debug_settings(DebugHackerySettings &new_state)
 {
     static constexpr int64_t kOneSecondNanos = 1000000000;
+    bool adaptive_vsync_was_enabled =
+        g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled;
     g_debug_hackery_settings = new_state;
 
     g_debug_hackery_settings.render_frequency_ns =
@@ -412,6 +415,19 @@ static void apply_debug_settings(DebugHackerySettings &new_state)
             kOneSecondNanos /
                 static_cast<int64_t>(new_state.target_render_fps) :
             0;
+
+    if (g_vsync && adaptive_vsync_was_enabled !=
+        new_state.enable_adaptive_vsync_if_vsync_enabled) {
+
+        if (new_state.enable_adaptive_vsync_if_vsync_enabled) {
+            if (!SDL_GL_SetSwapInterval(-1)) {
+                fprintf(stderr, "VSYNC adaptive failed\n");
+                g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled = false;
+            }
+        } else {
+            SDL_GL_SetSwapInterval(1);
+        }
+    }
 }
 
 static void debug_hackery_overlay(void)
@@ -446,22 +462,27 @@ static void debug_hackery_overlay(void)
             ImGui::TableNextColumn();
             ImGui::Checkbox("##Adaptive UI sleep",
                             &local_state.adaptive_ui_thread_sleep);
-            if (local_state.adaptive_ui_thread_sleep) {
-                ImGui::BeginDisabled();
-            }
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("UI Render FPS");
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(60.0f);
-            if (ImGui::InputInt("##UI Render FPS",
-                                &local_state.target_render_fps, 0)) {
-                if (local_state.target_render_fps > 600)
-                    local_state.target_render_fps = 600;
-            }
-            if (local_state.adaptive_ui_thread_sleep) {
-                ImGui::EndDisabled();
+
+            {
+                if (local_state.adaptive_ui_thread_sleep) {
+                    ImGui::BeginDisabled();
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("UI Render FPS");
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(60.0f);
+                if (ImGui::InputInt("##UI Render FPS",
+                                    &local_state.target_render_fps, 0)) {
+                    if (local_state.target_render_fps > 600)
+                        local_state.target_render_fps = 600;
+                }
+
+                if (local_state.adaptive_ui_thread_sleep) {
+                    ImGui::EndDisabled();
+                }
             }
 
             ImGui::TableNextRow();
@@ -480,6 +501,15 @@ static void debug_hackery_overlay(void)
                         16000;
             }
 
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Allow tearing on late swaps");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Allow tearing on late swaps",
+                            &local_state.enable_adaptive_vsync_if_vsync_enabled);
+
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
@@ -488,11 +518,14 @@ static void debug_hackery_overlay(void)
 
         bool is_modified =
             (local_state.ui_throttle_swap_grace_period_microseconds !=
-             g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds) ||
+             g_debug_hackery_settings
+                 .ui_throttle_swap_grace_period_microseconds) ||
             (local_state.target_render_fps !=
              g_debug_hackery_settings.target_render_fps) ||
             (local_state.adaptive_ui_thread_sleep !=
-             g_debug_hackery_settings.adaptive_ui_thread_sleep);
+             g_debug_hackery_settings.adaptive_ui_thread_sleep) ||
+            (local_state.enable_adaptive_vsync_if_vsync_enabled !=
+             g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled);
 
         ImGui::BeginDisabled(!is_modified);
 
@@ -585,11 +618,16 @@ void xemu_hud_render()
 
         if (!g_vsync) {
             SDL_GL_SetSwapInterval(0);
-        } /*else if (SDL_GL_SetSwapInterval(-1)) {
-            fprintf(stderr, "VSYNC adaptive\n");
-        } */else if (!SDL_GL_SetSwapInterval(1)) {
-            fprintf(stderr, "Failed to set swap interval to 1. %s\n",
-                    SDL_GetError());
+        } else {
+            if (g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled) {
+                if (!SDL_GL_SetSwapInterval(-1)) {
+                    fprintf(stderr, "VSYNC adaptive failed\n");
+                    g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled = false;
+                    SDL_GL_SetSwapInterval(1);
+                }
+            } else {
+                SDL_GL_SetSwapInterval(1);
+            }
         }
     }
 
