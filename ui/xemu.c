@@ -976,6 +976,7 @@ static bool event_watch_callback(void *userdata, SDL_Event *event)
     if (event->type == SDL_EVENT_WINDOW_EXPOSED ||
         event->type == SDL_EVENT_WINDOW_RESIZED) {
         gl_render_frame(scon);
+        ++g_debug_hackery_profile_info.event_driven_updates;
     } else if (event->type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED ||
                event->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
         calculate_vsync_interval_ns();

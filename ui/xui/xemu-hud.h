@@ -50,6 +50,7 @@ typedef struct DebugHackeryProfileInfo {
     int64_t out_of_time_frames;
     int64_t last_frame_total_time;
     int64_t last_sleep_time_ns;
+    int64_t event_driven_updates;
 } DebugHackeryProfileInfo;
 
 extern DebugHackeryProfileInfo g_debug_hackery_profile_info;

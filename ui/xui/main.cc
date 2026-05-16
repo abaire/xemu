@@ -605,7 +605,8 @@ static void fps_overlay()
                  "Last app slp (ns)     : %10lld\n"
                  "Out of time pauses    : %10lld\n"
                  "app delayed frames    : %10lld\n"
-                 "driver delayed frames : %10lld",
+                 "driver delayed frames : %10lld\n"
+                 "event driven updates  : %10lld",
                  gui_fullscreen ? (g_config.display.window.fullscreen_exclusive ? "ExFS" : "FS") : "W",
                  io.Framerate,
                  g_guest_fps,
@@ -615,7 +616,8 @@ static void fps_overlay()
                  g_debug_hackery_profile_info.last_sleep_time_ns,
                  g_debug_hackery_profile_info.out_of_time_frames,
                  g_debug_hackery_profile_info.slept_frames,
-                 g_debug_hackery_profile_info.nowait_frames
+                 g_debug_hackery_profile_info.nowait_frames,
+                 g_debug_hackery_profile_info.event_driven_updates
         );
     }
 
