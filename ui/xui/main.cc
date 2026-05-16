@@ -543,6 +543,7 @@ static void debug_hackery_overlay(void)
     ImGui::End();
 }
 
+extern "C" int gui_fullscreen;
 extern "C" volatile int g_guest_fps;
 
 static void fps_overlay()
@@ -575,6 +576,7 @@ static void fps_overlay()
     static int frame_counter = 0;
     if (frame_counter++ % 10 == 0) {
         snprintf(data, sizeof(data),
+                 "Window state: %s\n"
                  "UI FPS: %.1f\n"
                  "Guest FPS: %d\n"
                  "Resyncs               : %10lld\n"
@@ -584,6 +586,7 @@ static void fps_overlay()
                  "Out of time pauses    : %10lld\n"
                  "app delayed frames    : %10lld\n"
                  "driver delayed frames : %10lld",
+                 gui_fullscreen ? (g_config.display.window.fullscreen_exclusive ? "ExFS" : "FS") : "W",
                  io.Framerate,
                  g_guest_fps,
                  g_debug_hackery_profile_info.sleep_resyncs,

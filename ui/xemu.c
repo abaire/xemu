@@ -101,7 +101,7 @@ static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
 static bool alt_grab;
 static bool ctrl_grab;
 static int gui_saved_grab;
-static int gui_fullscreen;
+int gui_fullscreen;
 static int gui_grab_code = SDL_KMOD_LALT | SDL_KMOD_LCTRL;
 static SDL_Cursor *sdl_cursor_normal;
 static SDL_Cursor *sdl_cursor_hidden;
