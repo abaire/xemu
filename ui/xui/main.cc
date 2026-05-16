@@ -510,6 +510,7 @@ static void debug_hackery_overlay(void)
 
 extern "C" int64_t slept_frames;
 extern "C" int64_t nowait_frames;
+extern "C" int64_t last_frame_swap_time;
 
 static void fps_overlay()
 {
@@ -520,8 +521,11 @@ static void fps_overlay()
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.7f);
     if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
+        ImGui::Text(" -- Frame rate info -------------------------- ");
         ImGui::Text("UI FPS: %.1f", io.Framerate);
         ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
+
+        ImGui::Text("Last frm drv swap (us): %-10lld", last_frame_swap_time / 1000);
 
         ImGui::Text("app delayed frames: %lld", slept_frames);
         ImGui::Text("driver delayed frames: %lld", nowait_frames);

@@ -801,6 +801,7 @@ static int64_t display_vsync_interval = 1000000000LL / 60;
 
 int64_t slept_frames = 0;
 int64_t nowait_frames = 0;
+int64_t last_frame_swap_time = 0;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -892,9 +893,12 @@ static void gl_render_frame(struct xemu_console *scon)
         ++nowait_frames;
     }
 
+    int64_t swap_start = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     SDL_GL_SwapWindow(scon->real_window);
     last_ui_frame_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     assert(glGetError() == GL_NO_ERROR);
+
+    last_frame_swap_time = last_ui_frame_time_ns - swap_start;
 
     qatomic_set(&rendering, false);
 
