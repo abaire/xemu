@@ -511,6 +511,7 @@ static void debug_hackery_overlay(void)
 extern "C" int64_t slept_frames;
 extern "C" int64_t nowait_frames;
 extern "C" int64_t last_frame_swap_time;
+extern "C" int64_t out_of_time_frames;
 
 static void fps_overlay()
 {
@@ -526,6 +527,7 @@ static void fps_overlay()
         ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
 
         ImGui::Text("Last frm drv swap (us): %-10lld", last_frame_swap_time / 1000);
+        ImGui::Text("Out of time pauses: %lld", out_of_time_frames);
 
         ImGui::Text("app delayed frames: %lld", slept_frames);
         ImGui::Text("driver delayed frames: %lld", nowait_frames);

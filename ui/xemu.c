@@ -802,6 +802,7 @@ static int64_t display_vsync_interval = 1000000000LL / 60;
 int64_t slept_frames = 0;
 int64_t nowait_frames = 0;
 int64_t last_frame_swap_time = 0;
+int64_t out_of_time_frames = 0;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -876,10 +877,13 @@ static void gl_render_frame(struct xemu_console *scon)
         } else if (g_debug_hackery_settings.render_frequency_ns) {
             next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
         }
-        next_frame -= (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
+        int64_t grace_period = (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
+        if (next_frame && next_frame < grace_period) {
+            ++out_of_time_frames;
+        }
 
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-        if (now < next_frame) {
+        if (next_frame > grace_period && now < (next_frame - grace_period)) {
 #if DEBUG_XEMU_C
             last_forced_delay = next_frame - now;
             cumulative_delay += last_forced_delay;
