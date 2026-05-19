@@ -980,6 +980,10 @@ static bool event_watch_callback(void *userdata, SDL_Event *event)
     } else if (event->type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED ||
                event->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
         calculate_vsync_interval_ns();
+    } else if (event->type == SDL_EVENT_WINDOW_RESTORED ||
+               event->type == SDL_EVENT_WINDOW_MAXIMIZED ||
+               event->type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
+        next_vblank_target_ns = 0;
     }
 
     return true; // Ignored
