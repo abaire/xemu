@@ -796,21 +796,118 @@ static void report_stats(void)
 }
 #endif
 
-static int64_t last_ui_frame_time_ns = 0;
-static int64_t display_vsync_interval = 1000000000LL / 60;
-static int64_t next_vblank_target_ns = 0;
+typedef struct VBlankPhaseLockedLoop {
+    int64_t vblank_period_ns;
+    int64_t expected_vblank_ns;
+    int64_t last_vblank_ns;
+    int64_t integral_gain_divisor;
+    int64_t proportional_gain_divisor;
+    bool phase_locked;
+} VBlankPLL;
 
-static inline void present_frame(struct xemu_console *scon)
+static inline int64_t pll_wrap_phase_error(int64_t error, int64_t period)
 {
-    int64_t interval = 0;
-    if (g_config.display.window.vsync && display_vsync_interval) {
-        if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
-            interval = display_vsync_interval;
-        } else if (g_debug_hackery_settings.render_frequency_ns) {
-            interval = g_debug_hackery_settings.render_frequency_ns;
+    const int64_t wrapped = error % period;
+    const int64_t half_period = period / 2;
+
+    if (wrapped > half_period) {
+        return wrapped - period;
+    }
+
+    if (wrapped < -half_period) {
+        return wrapped + period;
+    }
+
+    return wrapped;
+}
+
+#define PLL_BASE_JITTER_NS 1500000LL
+static VBlankPLL vblank_pll_state = { 0 };
+static int64_t last_ui_frame_time_ns = 0;
+
+static inline void pll_swap_window(SDL_Window *window)
+{
+    if (vblank_pll_state.phase_locked) {
+        const int64_t grace_period_ns =
+            1000 * (int64_t)g_debug_hackery_settings
+                       .ui_throttle_swap_grace_period_microseconds;
+
+        int64_t now = (int64_t)SDL_GetTicksNS();
+        int64_t sleep_target_ns =
+            vblank_pll_state.expected_vblank_ns - grace_period_ns;
+        int64_t delay_ns = sleep_target_ns - now;
+        g_debug_hackery_profile_info.last_sleep_time_ns = delay_ns;
+
+        if (delay_ns > 0 && delay_ns < vblank_pll_state.vblank_period_ns) {
+            SDL_DelayPrecise((uint64_t)delay_ns);
+            ++g_debug_hackery_profile_info.slept_frames;
+        } else if (delay_ns <= 0 && delay_ns >= -grace_period_ns) {
+            ++g_debug_hackery_profile_info.out_of_time_frames;
+        } else {
+            ++g_debug_hackery_profile_info.nowait_frames;
         }
     }
 
+    const int64_t swap_start = SDL_GetTicksNS();
+    SDL_GL_SwapWindow(window);
+    const int64_t swap_finish = (int64_t)SDL_GetTicksNS();
+
+    g_debug_hackery_profile_info.last_frame_swap_time =
+        swap_finish - swap_start;
+    g_debug_hackery_profile_info.last_frame_total_time =
+        swap_finish - last_ui_frame_time_ns;
+    last_ui_frame_time_ns = swap_finish;
+
+    if (!vblank_pll_state.phase_locked) {
+        if (vblank_pll_state.last_vblank_ns != 0) {
+            int64_t delta = pll_wrap_phase_error(
+                swap_finish - vblank_pll_state.last_vblank_ns,
+                vblank_pll_state.vblank_period_ns);
+
+            const int64_t bootstrap_tol =
+                MIN(PLL_BASE_JITTER_NS, vblank_pll_state.vblank_period_ns / 5);
+            if (llabs(delta) < bootstrap_tol) {
+                vblank_pll_state.expected_vblank_ns = swap_finish;
+                vblank_pll_state.phase_locked = true;
+            }
+        }
+        vblank_pll_state.last_vblank_ns = swap_finish;
+        return;
+    }
+
+    int64_t error_ns = swap_finish - vblank_pll_state.expected_vblank_ns;
+    if (llabs(error_ns) >
+        vblank_pll_state.vblank_period_ns *
+            g_debug_hackery_settings.missed_frame_resync_interval) {
+        vblank_pll_state.expected_vblank_ns = swap_finish;
+        ++g_debug_hackery_profile_info.sleep_resyncs;
+    } else {
+        int64_t phase_error_ns =
+            pll_wrap_phase_error(error_ns, vblank_pll_state.vblank_period_ns);
+        int64_t nearest_vblank = swap_finish - phase_error_ns;
+
+        const int64_t tear_tol =
+            MIN(PLL_BASE_JITTER_NS * 2, vblank_pll_state.vblank_period_ns / 4);
+        if (llabs(phase_error_ns) > tear_tol) {
+            // Handle adaptive vsync tearing swaps. These can occur
+            // significantly out of phase and should be ignored.
+            vblank_pll_state.expected_vblank_ns =
+                nearest_vblank + vblank_pll_state.vblank_period_ns;
+        } else {
+            vblank_pll_state.vblank_period_ns +=
+                phase_error_ns / vblank_pll_state.integral_gain_divisor;
+            vblank_pll_state.expected_vblank_ns =
+                nearest_vblank + vblank_pll_state.vblank_period_ns +
+                (phase_error_ns / vblank_pll_state.proportional_gain_divisor);
+        }
+    }
+}
+
+static int64_t display_vsync_interval_ns = 1000000000LL / 60;
+static int64_t next_vblank_target_ns = 0;
+static inline void framecap_swap_window(SDL_Window *window)
+{
+    const int64_t interval = g_debug_hackery_settings.render_frequency_ns;
     if (interval && next_vblank_target_ns != 0) {
         int64_t now = SDL_GetTicksNS();
         int64_t grace_period = (int64_t)g_debug_hackery_settings
@@ -840,7 +937,7 @@ static inline void present_frame(struct xemu_console *scon)
     }
 
     int64_t swap_start = SDL_GetTicksNS();
-    SDL_GL_SwapWindow(scon->real_window);
+    SDL_GL_SwapWindow(window);
     int64_t swap_finish = SDL_GetTicksNS();
 
     g_debug_hackery_profile_info.last_frame_swap_time =
@@ -849,42 +946,32 @@ static inline void present_frame(struct xemu_console *scon)
         swap_finish - last_ui_frame_time_ns;
     last_ui_frame_time_ns = swap_finish;
 
-    if (interval) {
-        // 1. Hard Phase Anchor (only for initialization or massive stalls)
-        if (next_vblank_target_ns == 0 ||
-            swap_finish > next_vblank_target_ns + interval * g_debug_hackery_settings.missed_frame_resync_interval) {
-            next_vblank_target_ns = swap_finish + interval;
-            ++g_debug_hackery_profile_info.sleep_resyncs;
-        } else {
-            // 2. Pure mathematical advancement
-            next_vblank_target_ns += interval;
+    next_vblank_target_ns = swap_finish + interval;
+}
 
-            // Phase-preserving catch-up if we missed a frame
-            while (next_vblank_target_ns <= swap_finish) {
-                next_vblank_target_ns += interval;
-            }
+static inline void present_frame(struct xemu_console *scon)
+{
+    if (g_config.display.window.vsync && display_vsync_interval_ns) {
+        if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
+            pll_swap_window(scon->real_window);
+            return;
+        }
 
-            // 3. CLOSED-LOOP FEEDBACK: Micro-adjust the phase based on swap
-            // time
-            int64_t ideal_swap_time_ns = 2000000; // 2ms target overhead
-            int64_t actual_swap_time =
-                g_debug_hackery_profile_info.last_frame_swap_time;
-
-            // Only correct if SwapWindow took longer than ideal, but DID NOT
-            // miss the frame (meaning it was less than the interval).
-            if (actual_swap_time > ideal_swap_time_ns &&
-                actual_swap_time < (interval - 2000000)) {
-                // Calculate how "early" our phase anchor is
-                int64_t phase_error = actual_swap_time - ideal_swap_time_ns;
-
-                // Nudge the target forward by 10% of the error.
-                // This slowly pushes the sleep cycle later, shrinking
-                // SwapWindow time frame-by-frame until actual_swap_time hits
-                // ~2ms.
-                next_vblank_target_ns += (phase_error / 10);
-            }
+        if (g_debug_hackery_settings.render_frequency_ns) {
+            framecap_swap_window(scon->real_window);
+            return;
         }
     }
+
+    const int64_t swap_start = SDL_GetTicksNS();
+    SDL_GL_SwapWindow(scon->real_window);
+    const int64_t swap_finish = SDL_GetTicksNS();
+
+    g_debug_hackery_profile_info.last_frame_swap_time =
+        swap_finish - swap_start;
+    g_debug_hackery_profile_info.last_frame_total_time =
+        swap_finish - last_ui_frame_time_ns;
+    last_ui_frame_time_ns = swap_finish;
 }
 
 /**
@@ -945,28 +1032,40 @@ static void gl_render_frame(struct xemu_console *scon)
 #endif
 }
 
+static inline void apply_vsync_interval(const int64_t interval)
+{
+    display_vsync_interval_ns = interval;
+
+    vblank_pll_state.vblank_period_ns = interval;
+    // Gain is calculated with a target of locking within ~1.6 seconds at 60Hz.
+    vblank_pll_state.integral_gain_divisor = 1666666666LL / interval;
+    vblank_pll_state.proportional_gain_divisor = 166666666LL / interval;
+}
+
 static void calculate_vsync_interval_ns(void)
 {
     SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
     const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
     if (mode && mode->refresh_rate_numerator > 0 &&
         mode->refresh_rate_denominator > 0) {
-        display_vsync_interval =
-            (1000000000LL * mode->refresh_rate_denominator) /
-            mode->refresh_rate_numerator;
-
-        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%d / %d)\n", display_vsync_interval, mode->refresh_rate_denominator, mode->refresh_rate_numerator);
+        apply_vsync_interval((1000000000LL * mode->refresh_rate_denominator) /
+                             mode->refresh_rate_numerator);
+        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%d / %d)\n",
+                display_vsync_interval_ns, mode->refresh_rate_denominator,
+                mode->refresh_rate_numerator);
         return;
     }
 
     if (mode && mode->refresh_rate > 0) {
-        display_vsync_interval = (int64_t)(1000000000.0 / mode->refresh_rate);
-        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%f)\n", display_vsync_interval, mode->refresh_rate);
+        apply_vsync_interval((int64_t)(1000000000.0 / mode->refresh_rate));
+        fprintf(stderr, "calculate_vsync_interval_ns: %lld (%f)\n",
+                display_vsync_interval_ns, mode->refresh_rate);
         return;
     }
 
-    display_vsync_interval = 1000000000LL / 60;
-    fprintf(stderr, "calculate_vsync_interval_ns: failed to calculate actual interval, using 60fps\n");
+    apply_vsync_interval(1000000000LL / 60);
+    fprintf(stderr, "calculate_vsync_interval_ns: failed to calculate actual "
+                    "interval, using 60fps\n");
 }
 
 static bool event_watch_callback(void *userdata, SDL_Event *event)
