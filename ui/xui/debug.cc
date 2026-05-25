@@ -743,7 +743,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
     if (ImGui::BeginTable("##FrameTimingBreakdownTable", 2,
                           ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupColumn("Legend", ImGuiTableColumnFlags_WidthFixed,
-                                250 * g_viewport_mgr.m_scale);
+                                300 * g_viewport_mgr.m_scale);
         ImGui::TableSetupColumn("Plot", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
@@ -901,7 +901,9 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
                               ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend)) {
             ImPlot::SetupAxes("Frames", "Microseconds", ImPlotAxisFlags_None,
                               ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 33333.3, ImGuiCond_Always);
+            #define TIMING_BREAKDOWN_MAX_MICROSECONDS 200000
+            // #define TIMING_BREAKDOWN_MAX_MICROSECONDS  33333
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, TIMING_BREAKDOWN_MAX_MICROSECONDS, ImGuiCond_Always);
 
             if (ImPlot::IsPlotHovered()) {
                 new_hovered_accumulator_index = FindHoveredAccumulatorIndex();

@@ -19,6 +19,8 @@
 
 #include "hw/xbox/nv2a/nv2a_int.h"
 
+#include <SDL3/SDL.h>
+
 NV2AStats g_nv2a_stats;
 
 void nv2a_profile_increment(void)
@@ -75,13 +77,13 @@ int nv2a_profile_get_counter_value(unsigned int cnt)
 
 int64_t nv2a_profile_duration_start(void)
 {
-    return qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    return SDL_GetTicksNS() / 1000;
 }
 
 void nv2a_profile_accumulate_duration_us(enum NV2A_PROF_ACCUMULATORS_ENUM acc,
                                          int64_t start)
 {
-    int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    int64_t now = SDL_GetTicksNS() / 1000;
     nv2a_profile_accumulate(acc, now - start);
 }
 

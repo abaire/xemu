@@ -692,6 +692,8 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
         return;
     }
 
+    int64_t profile_start = nv2a_profile_duration_start();
+
     trace_nv2a_pgraph_surface_download(
         surface->color ? "COLOR" : "ZETA",
         surface->swizzle ? "sz" : "lin", surface->vram_addr,
@@ -730,12 +732,16 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
         gl_read_buf = pg->scale_buf;
     }
 
-    glo_readpixels(
-        surface->fmt.gl_format, surface->fmt.gl_type, surface->fmt.bytes_per_pixel,
-        pg->surface_scale_factor * surface->pitch,
-        pg->surface_scale_factor * surface->width,
-        pg->surface_scale_factor * surface->height, flip, gl_read_buf);
-
+    {
+        int64_t read_start = nv2a_profile_duration_start();
+        glo_readpixels(
+            surface->fmt.gl_format, surface->fmt.gl_type, surface->fmt.bytes_per_pixel,
+            pg->surface_scale_factor * surface->pitch,
+            pg->surface_scale_factor * surface->width,
+            pg->surface_scale_factor * surface->height, flip, gl_read_buf);
+        nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__READ_PIXELS,
+                                        read_start);
+    }
     /* FIXME: Replace this with a hw accelerated version */
     if (downscale) {
         assert(surface->pitch >= (surface->width * surface->fmt.bytes_per_pixel));
@@ -751,15 +757,29 @@ static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
     }
 
     if (swizzle) {
+        int64_t swizzle_start = nv2a_profile_duration_start();
+
         swizzle_rect(swizzle_buf, surface->width, surface->height, pixels,
                      surface->pitch, surface->fmt.bytes_per_pixel);
         g_free(swizzle_buf);
+
+        nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__SWIZZLE,
+                                swizzle_start);
+
     }
 
     /* Re-bind original framebuffer target */
-    glFramebufferTexture2D(GL_FRAMEBUFFER, surface->fmt.gl_attachment,
-                           GL_TEXTURE_2D, 0, 0);
-    bind_current_surface(d);
+    {
+        int64_t bind_start = nv2a_profile_duration_start();
+        glFramebufferTexture2D(GL_FRAMEBUFFER, surface->fmt.gl_attachment,
+                               GL_TEXTURE_2D, 0, 0);
+        bind_current_surface(d);
+        nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__BIND,
+                                        bind_start);
+    }
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE,
+                                    profile_start);
 }
 
 static void surface_download(NV2AState *d, SurfaceBinding *surface, bool force)
