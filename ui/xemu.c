@@ -805,48 +805,59 @@ static bool force_vsync_resync = true;
 // Time reserved for SDL_GL_SwapWindow to perform a swap. This value is chosen
 // empirically as the best balance between minimizing guest stalls while still
 // hitting the target host refresh rate.
-#define VSYNC_SWAP_GRACE_PERIOD_NS 800000LL
+#define VSYNC_SWAP_GRACE_PERIOD_NS 1400000LL
 #define VSYNC_RESYNC_FRAMES 2
 
 static inline void vsync_swap_window(SDL_Window *window)
 {
     static int64_t last_swap_complete = 0;
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-
     if (last_swap_complete > 0 && !force_vsync_resync) {
         int64_t next_vblank =
-            last_swap_complete + host_vblank_period_ns - VSYNC_SWAP_GRACE_PERIOD_NS;
+            last_swap_complete + host_vblank_period_ns;
+
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        int dropped_frames = 0;
+        while (next_vblank < now && dropped_frames < 2) {
+            next_vblank += host_vblank_period_ns;
+            ++dropped_frames;
+        }
         int64_t sleep_duration_ns = next_vblank - now;
-        if (sleep_duration_ns > 0) {
+        if (sleep_duration_ns > 0 && dropped_frames < 2) {
             int64_t sleep_start = nv2a_profile_duration_start();
             SDL_DelayPrecise(sleep_duration_ns);
             nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SLEEP,
                                         sleep_start);
+        } else {
+        	nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_NOSLEEPS, 1);
         }
     }
 
     int64_t swap_start = nv2a_profile_duration_start();
     SDL_GL_SwapWindow(window);
+    int64_t post_swap = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
     nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SWAP,
                                 swap_start);
 
-    int64_t post_swap = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    // Blindly assume that the vblank happened VSYNC_SWAP_GRACE_PERIOD_NS before SDL_GL_SwapWindow returned.
+    last_swap_complete = post_swap - VSYNC_SWAP_GRACE_PERIOD_NS;
 
-    if (!last_swap_complete || force_vsync_resync ||
-        post_swap >
-            last_swap_complete + VSYNC_RESYNC_FRAMES * host_vblank_period_ns) {
-        last_swap_complete = post_swap;
 
-        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_RESYNCS, 1);
-        force_vsync_resync = false;
-    } else {
-        int64_t elapsed_frames =
-            (post_swap - last_swap_complete + host_vblank_period_ns / 2) /
-            host_vblank_period_ns;
-        last_swap_complete += elapsed_frames * host_vblank_period_ns;
-
-        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_VBLANKS, elapsed_frames);
-    }
+//    if (!last_swap_complete || force_vsync_resync ||
+//        post_swap >
+//            last_swap_complete + VSYNC_RESYNC_FRAMES * host_vblank_period_ns) {
+//        last_swap_complete = post_swap;
+//
+//        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_RESYNCS, 1);
+//        force_vsync_resync = false;
+//    } else {
+//        int64_t elapsed_frames =
+//            (post_swap - last_swap_complete + host_vblank_period_ns / 2) /
+//            host_vblank_period_ns;
+//        last_swap_complete += elapsed_frames * host_vblank_period_ns;
+//
+//        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_VBLANKS, elapsed_frames);
+//    }
 }
 
 /**
@@ -904,7 +915,7 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    glFinish();
+    glFlush();
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
