@@ -80,6 +80,12 @@ int64_t nv2a_profile_duration_start(void)
     return SDL_GetTicksNS() / 1000;
 }
 
+void nv2a_profile_accumulate_raw(enum NV2A_PROF_ACCUMULATORS_ENUM acc,
+                                         int64_t val)
+{
+    nv2a_profile_accumulate(acc, val);
+}
+
 void nv2a_profile_accumulate_duration_us(enum NV2A_PROF_ACCUMULATORS_ENUM acc,
                                          int64_t start)
 {

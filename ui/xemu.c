@@ -54,6 +54,7 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
@@ -791,6 +792,63 @@ static void report_stats(void)
 }
 #endif
 
+enum VsyncOverrideBehavior {
+    VOB_FORCE_OFF,
+    VOB_FORCE_ON,
+    VOB_NO_OVERRIDE,
+};
+
+static enum VsyncOverrideBehavior host_vsync_override = VOB_NO_OVERRIDE;
+static int64_t host_vblank_period_ns = 0;
+static bool force_vsync_resync = true;
+
+// Time reserved for SDL_GL_SwapWindow to perform a swap. This value is chosen
+// empirically as the best balance between minimizing guest stalls while still
+// hitting the target host refresh rate.
+#define VSYNC_SWAP_GRACE_PERIOD_NS 800000LL
+#define VSYNC_RESYNC_FRAMES 2
+
+static inline void vsync_swap_window(SDL_Window *window)
+{
+    static int64_t last_swap_complete = 0;
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    if (last_swap_complete > 0 && !force_vsync_resync) {
+        int64_t next_vblank =
+            last_swap_complete + host_vblank_period_ns - VSYNC_SWAP_GRACE_PERIOD_NS;
+        int64_t sleep_duration_ns = next_vblank - now;
+        if (sleep_duration_ns > 0) {
+            int64_t sleep_start = nv2a_profile_duration_start();
+            SDL_DelayPrecise(sleep_duration_ns);
+            nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SLEEP,
+                                        sleep_start);
+        }
+    }
+
+    int64_t swap_start = nv2a_profile_duration_start();
+    SDL_GL_SwapWindow(window);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SWAP,
+                                swap_start);
+
+    int64_t post_swap = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    if (!last_swap_complete || force_vsync_resync ||
+        post_swap >
+            last_swap_complete + VSYNC_RESYNC_FRAMES * host_vblank_period_ns) {
+        last_swap_complete = post_swap;
+
+        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_RESYNCS, 1);
+        force_vsync_resync = false;
+    } else {
+        int64_t elapsed_frames =
+            (post_swap - last_swap_complete + host_vblank_period_ns / 2) /
+            host_vblank_period_ns;
+        last_swap_complete += elapsed_frames * host_vblank_period_ns;
+
+        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_VBLANKS, elapsed_frames);
+    }
+}
+
 /**
  * Renders the main interface. Usually called from the main thread,
  * but may sometimes be called from another thread.
@@ -846,7 +904,7 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    glFinish();
+    glFlush();
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
@@ -855,7 +913,17 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
     nv2a_release_framebuffer_surface();
-    SDL_GL_SwapWindow(scon->real_window);
+    if (host_vsync_override == VOB_FORCE_ON ||
+        (host_vsync_override == VOB_NO_OVERRIDE &&
+         g_config.display.window.vsync)) {
+        vsync_swap_window(scon->real_window);
+     } else {
+         int64_t swap_start = nv2a_profile_duration_start();
+         SDL_GL_SwapWindow(scon->real_window);
+         nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SWAP,
+                                     swap_start);
+     }
+
     assert(glGetError() == GL_NO_ERROR);
 
     qatomic_set(&rendering, false);
@@ -865,6 +933,23 @@ static void gl_render_frame(struct xemu_console *scon)
 #endif
 }
 
+static void calculate_vsync_interval_ns(void)
+{
+    SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
+    if (mode && mode->refresh_rate_numerator > 0 &&
+        mode->refresh_rate_denominator > 0) {
+        host_vblank_period_ns =
+            (1000000000LL * mode->refresh_rate_denominator) /
+            mode->refresh_rate_numerator;
+    } else if (mode && mode->refresh_rate > 0) {
+        host_vblank_period_ns = (int64_t)(1000000000.0 / mode->refresh_rate);
+    } else {
+        host_vblank_period_ns = 1000000000LL / 60;
+    }
+    force_vsync_resync = 1;
+}
+
 static bool event_watch_callback(void *userdata, SDL_Event *event)
 {
     struct xemu_console *scon = (struct xemu_console *)userdata;
@@ -872,6 +957,13 @@ static bool event_watch_callback(void *userdata, SDL_Event *event)
     if (event->type == SDL_EVENT_WINDOW_EXPOSED ||
         event->type == SDL_EVENT_WINDOW_RESIZED) {
         gl_render_frame(scon);
+    } else if (event->type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED ||
+               event->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
+        calculate_vsync_interval_ns();
+    } else if (event->type == SDL_EVENT_WINDOW_RESTORED ||
+               event->type == SDL_EVENT_WINDOW_MAXIMIZED ||
+               event->type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
+        force_vsync_resync = 1;
     }
 
     return true; // Ignored
@@ -1347,6 +1439,9 @@ int main(int argc, char **argv)
         vblank_timer = timer_new_ns(QEMU_CLOCK_REALTIME, vblank_timer_callback, &scon_list[0]);
         timer_mod_ns(vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + vblank_interval_ns);
     }
+
+    calculate_vsync_interval_ns();
+    fprintf(stderr, "Update host vblank period: %lld\n", host_vblank_period_ns);
 
     while (1) {
         struct xemu_console *scon = &scon_list[0];
