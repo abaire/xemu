@@ -53,6 +53,7 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
@@ -904,6 +905,43 @@ static inline void pll_swap_window(SDL_Window *window)
 }
 
 static int64_t display_vsync_interval_ns = 1000000000LL / 60;
+static inline void vsync_swap_window(SDL_Window *window)
+{
+    static int64_t last_swap_complete = 0;
+    if (last_swap_complete > 0) {
+        int64_t next_vblank =
+            last_swap_complete + display_vsync_interval_ns;
+
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        int dropped_frames = 0;
+        while (next_vblank < now && dropped_frames < 2) {
+            next_vblank += display_vsync_interval_ns;
+            ++dropped_frames;
+        }
+        int64_t sleep_duration_ns = next_vblank - now;
+        if (sleep_duration_ns > 0 && dropped_frames < 2) {
+            int64_t sleep_start = nv2a_profile_duration_start();
+            SDL_DelayPrecise(sleep_duration_ns);
+            nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SLEEP,
+                                        sleep_start);
+        } else {
+        	nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_NOSLEEPS, 1);
+        }
+    }
+
+    int64_t swap_start = nv2a_profile_duration_start();
+    SDL_GL_SwapWindow(window);
+    int64_t post_swap = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_GL_MAIN_THREAD_SWAP,
+                                swap_start);
+
+    // Blindly assume that the vblank happened grace_period before SDL_GL_SwapWindow returned.
+    last_swap_complete = post_swap - (g_debug_hackery_settings
+                                   .ui_throttle_swap_grace_period_microseconds *
+                               1000);
+}
+
 static int64_t next_vblank_target_ns = 0;
 static inline void framecap_swap_window(SDL_Window *window)
 {
@@ -953,7 +991,8 @@ static inline void present_frame(struct xemu_console *scon)
 {
     if (g_config.display.window.vsync && display_vsync_interval_ns) {
         if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
-            pll_swap_window(scon->real_window);
+            //pll_swap_window(scon->real_window);
+            vsync_swap_window(scon->real_window);
             return;
         }
 

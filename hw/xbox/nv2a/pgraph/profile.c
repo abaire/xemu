@@ -88,6 +88,10 @@ void nv2a_profile_accumulate_duration_us(enum NV2A_PROF_ACCUMULATORS_ENUM acc,
     nv2a_profile_accumulate(acc, now - start);
 }
 
+void nv2a_profile_accumulate_raw(enum NV2A_PROF_ACCUMULATORS_ENUM acc, int64_t val) {
+    nv2a_profile_accumulate(acc, val);
+}
+
 const char *nv2a_profile_get_accumulator_name(unsigned int acc)
 {
     const char *default_names[NV2A_PROF_ACCUMULATORS__COUNT] = {
