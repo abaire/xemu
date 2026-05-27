@@ -743,7 +743,7 @@ void DebugVideoWindow::DrawFrameTimingBreakdownContent()
     if (ImGui::BeginTable("##FrameTimingBreakdownTable", 2,
                           ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupColumn("Legend", ImGuiTableColumnFlags_WidthFixed,
-                                300 * g_viewport_mgr.m_scale);
+                                380 * g_viewport_mgr.m_scale);
         ImGui::TableSetupColumn("Plot", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableNextRow();
         ImGui::TableNextColumn();

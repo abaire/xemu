@@ -148,6 +148,12 @@ enum NV2A_PROF_COUNTERS_ENUM {
     _X(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__READ_PIXELS) \
     _X(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__BIND) \
     _X(NV2A_PROF_GL_DRAW_BEGIN__SURFACE_UPDATE__SWIZZLE) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_SLEEP) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_SWAP) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_RESYNCS) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_VBLANKS) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_NOSLEEPS) \
+    _X(NV2A_PROF_GL_MAIN_THREAD_DROPPED_FRAMES) \
 
 enum NV2A_PROF_ACCUMULATORS_ENUM {
     #define _X(x) x,
@@ -218,6 +224,7 @@ static inline void nv2a_profile_accumulate(enum NV2A_PROF_ACCUMULATORS_ENUM acc,
 
 int64_t nv2a_profile_duration_start(void);
 void nv2a_profile_accumulate_duration_us(enum NV2A_PROF_ACCUMULATORS_ENUM acc, int64_t start);
+void nv2a_profile_accumulate_raw(enum NV2A_PROF_ACCUMULATORS_ENUM acc, int64_t val);
 
 #ifdef CONFIG_RENDERDOC
 void nv2a_dbg_renderdoc_init(void);
