@@ -805,7 +805,7 @@ static bool force_vsync_resync = true;
 // Time reserved for SDL_GL_SwapWindow to perform a swap. This value is chosen
 // empirically as the best balance between minimizing guest stalls while still
 // hitting the target host refresh rate.
-#define VSYNC_SWAP_GRACE_PERIOD_NS 1400000LL
+#define VSYNC_SWAP_GRACE_PERIOD_NS 400LL * 1000LL
 #define VSYNC_RESYNC_FRAMES 2
 
 static inline void vsync_swap_window(SDL_Window *window)
@@ -821,6 +821,8 @@ static inline void vsync_swap_window(SDL_Window *window)
             next_vblank += host_vblank_period_ns;
             ++dropped_frames;
         }
+        nv2a_profile_accumulate_raw(NV2A_PROF_GL_MAIN_THREAD_DROPPED_FRAMES, dropped_frames);
+
         int64_t sleep_duration_ns = next_vblank - now;
         if (sleep_duration_ns > 0 && dropped_frames < 2) {
             int64_t sleep_start = nv2a_profile_duration_start();
@@ -841,6 +843,7 @@ static inline void vsync_swap_window(SDL_Window *window)
 
     // Blindly assume that the vblank happened VSYNC_SWAP_GRACE_PERIOD_NS before SDL_GL_SwapWindow returned.
     last_swap_complete = post_swap - VSYNC_SWAP_GRACE_PERIOD_NS;
+    force_vsync_resync = false;
 
 
 //    if (!last_swap_complete || force_vsync_resync ||
