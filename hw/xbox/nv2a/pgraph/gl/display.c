@@ -374,6 +374,9 @@ static void gl_fence(void)
 
 void pgraph_gl_sync(NV2AState *d)
 {
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
     VGADisplayParams vga_display_params;
     d->vga.get_params(&d->vga, &vga_display_params);
 
@@ -393,8 +396,16 @@ void pgraph_gl_sync(NV2AState *d)
     /* Render framebuffer in display context */
     glo_set_current(g_nv2a_context_display);
     render_display(d, surface);
-    gl_fence();
-    assert(glGetError() == GL_NO_ERROR);
+    
+    unsigned int width, height;
+    d->vga.get_resolution(&d->vga, (int*)&width, (int*)&height);
+    if (d->vga.cr[NV_PRMCIO_INTERLACE_MODE] != NV_PRMCIO_INTERLACE_MODE_DISABLED) {
+        height *= 2;
+    }
+    pgraph_apply_scaling_factor(&d->pgraph, &width, &height);
+
+    glo_context_push_framebuffer(g_nv2a_context_display, r->disp_rndr.fbo, r->gl_display_buffer, width, height, 
+                                 r->gl_display_buffer_format, r->gl_display_buffer_type);
 
     /* Switch back to original context */
     glo_set_current(g_nv2a_context_render);
@@ -406,7 +417,6 @@ void pgraph_gl_sync(NV2AState *d)
 int pgraph_gl_get_framebuffer_surface(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
-    PGRAPHGLState *r = pg->gl_renderer_state;
 
     qemu_mutex_lock(&d->pfifo.lock);
     // FIXME: Possible race condition with pgraph, consider lock
@@ -436,5 +446,5 @@ int pgraph_gl_get_framebuffer_surface(NV2AState *d)
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&d->pgraph.sync_complete);
 
-    return r->gl_display_buffer;
+    return glo_context_pull_framebuffer(g_nv2a_context_display);
 }
