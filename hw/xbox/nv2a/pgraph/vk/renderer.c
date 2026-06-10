@@ -23,13 +23,13 @@
 #include "gloffscreen.h"
 
 #if HAVE_EXTERNAL_MEMORY
-static GloContext *g_gl_context;
+GloContext *g_gl_context;
 #endif
 
 static void early_context_init(void)
 {
 #if HAVE_EXTERNAL_MEMORY
-    g_gl_context = glo_context_create();
+    g_gl_context = glo_context_create_pbo(NULL);
 #endif
 }
 
@@ -107,7 +107,22 @@ static void pgraph_vk_flush(NV2AState *d)
 static void pgraph_vk_sync(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
     pgraph_vk_render_display(pg);
+
+#if HAVE_EXTERNAL_MEMORY
+    glo_set_current(g_gl_context);
+
+    unsigned int width, height;
+    d->vga.get_resolution(&d->vga, (int*)&width, (int*)&height);
+    if (d->vga.cr[NV_PRMCIO_INTERLACE_MODE] != NV_PRMCIO_INTERLACE_MODE_DISABLED) {
+        height *= 2;
+    }
+    pgraph_apply_scaling_factor(&d->pgraph, &width, &height);
+
+    glo_context_push_framebuffer(g_gl_context, r->display.gl_fbo, r->display.gl_texture_id,
+                                 width, height, GL_RGBA, GL_UNSIGNED_BYTE);
+#endif
 
     qatomic_set(&d->pgraph.sync_pending, false);
     qemu_event_set(&d->pgraph.sync_complete);
@@ -172,7 +187,6 @@ static void pgraph_vk_pre_shutdown_wait(NV2AState *d)
 static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
-    PGRAPHVkState *r = pg->vk_renderer_state;
 
     qemu_mutex_lock(&d->pfifo.lock);
 
@@ -196,7 +210,7 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&d->pgraph.sync_complete);
-    return r->display.gl_texture_id;
+    return glo_context_pull_framebuffer(g_gl_context);
 #else
     qemu_mutex_unlock(&d->pfifo.lock);
     pgraph_vk_wait_for_surface_download(surface);

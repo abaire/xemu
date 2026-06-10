@@ -43,6 +43,11 @@
 
 #define HAVE_EXTERNAL_MEMORY 1
 
+#if HAVE_EXTERNAL_MEMORY
+#include "gloffscreen.h"
+extern GloContext *g_gl_context;
+#endif
+
 typedef struct QueueFamilyIndices {
     int queue_family;
 } QueueFamilyIndices;
@@ -294,6 +299,7 @@ typedef struct PGRAPHVkDisplayState {
 #endif
     GLuint gl_memory_obj;
     GLuint gl_texture_id;
+    GLuint gl_fbo;
 } PGRAPHVkDisplayState;
 
 typedef struct ComputePipelineKey {

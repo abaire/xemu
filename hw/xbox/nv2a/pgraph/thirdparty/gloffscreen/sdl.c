@@ -144,7 +144,6 @@ GloContext *glo_context_create_shared(GloContext *share)
 
 GloContext *glo_context_create_pbo(GloContext *share)
 {
-    assert(share != NULL);
     return glo_context_create_internal(share, GLO_TRANSFER_MODE_PBO_CHAIN);
 }
 
