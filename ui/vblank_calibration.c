@@ -33,9 +33,9 @@
 #define VBLANK_TARGET_HEADROOM_NS 1800000LL
 #define VBLANK_COARSE_SLEEP_HEADROOM_NS (3LL * NANOSECONDS_PER_MILLISECOND)
 
-#define CALIBRATION_TOTAL_FRAMES 10
-#define WARMUP_FRAMES 3
-#define MIN_VALID_INTERVALS 3
+#define CALIBRATION_TOTAL_FRAMES 60
+#define WARMUP_FRAMES 15
+#define MIN_VALID_INTERVALS 10
 
 /*
  * Sleep headroom before vblank target. This leaves some room for OS thread
@@ -110,8 +110,14 @@ void vblank_calibrate(SDL_Window *window)
         // DONOTSUBMIT
         fprintf(stderr,
                 "vblank_calibrate: measured interval = %" PRId64 " ns "
-                "(%d samples)\n",
-                g_vblank_cal.interval_ns, num_intervals);
+                "(%d samples, ~%f fps)\n",
+                g_vblank_cal.interval_ns, num_intervals,
+                (double)NANOSECONDS_PER_SECOND / g_vblank_cal.interval_ns);
+
+        for (int i = WARMUP_FRAMES + 1; i < CALIBRATION_TOTAL_FRAMES; ++i) {
+            fprintf(stderr, "\t@%" PRId64 " : %" PRId64 "ns \n", swap_times[i],
+                    swap_times[i] - swap_times[i - 1]);
+        }
     } else {
         fprintf(stderr,
                 "vblank_calibrate: calibration failed, "
