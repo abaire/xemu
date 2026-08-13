@@ -43,6 +43,7 @@
 #include "scene.hh"
 #include "scene-manager.hh"
 #include "main-menu.hh"
+#include "../vblank_calibration.h"
 #include "popup-menu.hh"
 #include "notifications.hh"
 #include "monitor.hh"
@@ -330,6 +331,9 @@ void xemu_hud_render()
     if (g_vsync != g_config.display.window.vsync) {
         g_vsync = g_config.display.window.vsync;
         SDL_GL_SetSwapInterval(g_vsync ? 1 : 0);
+        if (!g_vsync) {
+            vblank_calibration_reset();
+        }
     }
 
     if (g_screenshot_pending) {

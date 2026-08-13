@@ -59,6 +59,7 @@
 #include <locale.h>
 #include <math.h>
 #include <SDL3/SDL.h>
+#include "vblank_calibration.h"
 
 #ifndef DEBUG_XEMU_C
 #define DEBUG_XEMU_C 0
@@ -860,7 +861,14 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
     nv2a_release_framebuffer_surface();
+
+    if (g_config.display.window.vsync &&
+        g_config.display.window.vblank_pre_swap_sleep) {
+        vblank_await_next();
+    }
+
     SDL_GL_SwapWindow(scon->real_window);
+    vblank_notify_swap_complete();
     assert(glGetError() == GL_NO_ERROR);
 
     qatomic_set(&rendering, false);
@@ -1092,7 +1100,13 @@ static void display_early_init(DisplayOptions *o)
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
+
+    if (g_config.display.window.vsync &&
+        g_config.display.window.vblank_pre_swap_sleep) {
+        vblank_calibrate(m_window);
+    }
     SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
+
     xemu_hud_init(m_window, m_context);
 }
 

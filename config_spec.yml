@@ -257,6 +257,9 @@ display:
     vsync:
       type: bool
       default: true
+    vblank_pre_swap_sleep:
+      type: bool
+      default: true
   ui:
     show_menubar:
       type: bool

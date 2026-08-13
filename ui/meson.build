@@ -32,6 +32,7 @@ xemu_ss.add(files(
   'xemu-snapshots.c',
   'xemu-thumbnail.cc',
   'xemu-widescreen.c',
+  'vblank_calibration.c',
 ))
 
 if host_os == 'windows'
