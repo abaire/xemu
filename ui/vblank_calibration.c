@@ -65,27 +65,14 @@ static int dropped_frames_idx = 0;
 static int dropped_frames_count = 0;
 static int dropped_frames_sum = 0;
 
-static int set_swap_interval_with_fallback(int interval)
-{
-    if (SDL_GL_SetSwapInterval(interval) == 0) {
-        return 0;
-    }
-    if (interval == -1) {
-        return SDL_GL_SetSwapInterval(1);
-    }
-    return -1;
-}
-
 void vblank_calibrate(SDL_Window *window)
 {
     vblank_calibration_reset();
 
-    set_swap_interval_with_fallback(-1);
+    SDL_GL_SetSwapInterval(1);
 
     int64_t swap_times[CALIBRATION_TOTAL_FRAMES];
     for (int i = 0; i < CALIBRATION_TOTAL_FRAMES; ++i) {
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
         SDL_GL_SwapWindow(window);
         swap_times[i] = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     }
