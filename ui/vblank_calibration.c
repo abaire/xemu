@@ -28,8 +28,10 @@
 #include <epoxy/gl.h>
 #include <math.h>
 
-#define VBLANK_TARGET_HEADROOM_NS 1000000LL
-#define VBLANK_COARSE_SLEEP_HEADROOM_NS 2000000LL
+#define NANOSECONDS_PER_MILLISECOND 1000000LL
+
+#define VBLANK_TARGET_HEADROOM_NS 1800000LL
+#define VBLANK_COARSE_SLEEP_HEADROOM_NS (3LL * NANOSECONDS_PER_MILLISECOND)
 
 #define CALIBRATION_TOTAL_FRAMES 10
 #define WARMUP_FRAMES 3
@@ -46,6 +48,8 @@
 #define MIN_REASONABLE_INTERVAL_NS (NANOSECONDS_PER_SECOND / 600)
 #define MAX_REASONABLE_INTERVAL_NS (NANOSECONDS_PER_SECOND / 30)
 
+#define DROPPED_FRAMES_WINDOW_SIZE 30
+
 typedef struct {
     bool calibrated;
     int64_t interval_ns;
@@ -53,6 +57,13 @@ typedef struct {
 } VBlankCalibration;
 
 static VBlankCalibration g_vblank_cal;
+
+float g_ui_dropped_frame_average = 0.0f;
+
+static int dropped_frames_win[DROPPED_FRAMES_WINDOW_SIZE];
+static int dropped_frames_idx = 0;
+static int dropped_frames_count = 0;
+static int dropped_frames_sum = 0;
 
 static int set_swap_interval_with_fallback(int interval)
 {
@@ -67,9 +78,7 @@ static int set_swap_interval_with_fallback(int interval)
 
 void vblank_calibrate(SDL_Window *window)
 {
-    g_vblank_cal.calibrated = false;
-    g_vblank_cal.interval_ns = 0;
-    g_vblank_cal.last_swap_time_ns = 0;
+    vblank_calibration_reset();
 
     set_swap_interval_with_fallback(-1);
 
@@ -111,7 +120,22 @@ void vblank_calibrate(SDL_Window *window)
     }
 }
 
-static int64_t vblank_get_time_to_next_vblank_ns(void)
+static int get_elapsed_frames(void)
+{
+    if (!g_vblank_cal.calibrated || g_vblank_cal.interval_ns <= 0) {
+        return 0;
+    }
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    int64_t elapsed = now - g_vblank_cal.last_swap_time_ns;
+    if (elapsed <= 0) {
+        return 0;
+    }
+
+    return elapsed / g_vblank_cal.interval_ns;
+}
+
+static int64_t get_time_to_next_vblank_ns(void)
 {
     if (!g_vblank_cal.calibrated || g_vblank_cal.interval_ns <= 0) {
         return 0;
@@ -129,19 +153,42 @@ static int64_t vblank_get_time_to_next_vblank_ns(void)
     return target_vblank - now;
 }
 
+static void vblank_record_dropped_frames(int dropped_frames)
+{
+    if (dropped_frames < 0) {
+        return;
+    }
+
+    if (dropped_frames_count == DROPPED_FRAMES_WINDOW_SIZE) {
+        dropped_frames_sum -= dropped_frames_win[dropped_frames_idx];
+    } else {
+        dropped_frames_count++;
+    }
+
+    dropped_frames_win[dropped_frames_idx] = dropped_frames;
+    dropped_frames_sum += dropped_frames;
+    dropped_frames_idx = (dropped_frames_idx + 1) % DROPPED_FRAMES_WINDOW_SIZE;
+
+    g_ui_dropped_frame_average =
+        (float)dropped_frames_sum / dropped_frames_count;
+}
+
 void vblank_await_next(void)
 {
     if (!g_vblank_cal.calibrated) {
         return;
     }
 
-    int64_t time_to_vblank_ns = vblank_get_time_to_next_vblank_ns();
+    // DONOTSUBMIT
+    vblank_record_dropped_frames(get_elapsed_frames());
+
+    int64_t time_to_vblank_ns = get_time_to_next_vblank_ns();
 
     if (time_to_vblank_ns > VBLANK_COARSE_SLEEP_HEADROOM_NS) {
         int64_t coarse_sleep_ns =
             time_to_vblank_ns - VBLANK_COARSE_SLEEP_HEADROOM_NS;
         SDL_DelayPrecise(coarse_sleep_ns);
-        time_to_vblank_ns = vblank_get_time_to_next_vblank_ns();
+        time_to_vblank_ns = get_time_to_next_vblank_ns();
     }
 
     if (time_to_vblank_ns > VBLANK_TARGET_HEADROOM_NS) {
@@ -151,7 +198,7 @@ void vblank_await_next(void)
         }
     }
 
-    int64_t remaining_to_vblank = vblank_get_time_to_next_vblank_ns();
+    int64_t remaining_to_vblank = get_time_to_next_vblank_ns();
     if (remaining_to_vblank <= 0) {
         // DONOTSUBMIT: Debug message when pre-swap sleep overshot target vblank
         fprintf(stderr,
@@ -172,4 +219,10 @@ void vblank_calibration_reset(void)
     g_vblank_cal.calibrated = false;
     g_vblank_cal.interval_ns = 0;
     g_vblank_cal.last_swap_time_ns = 0;
+
+    memset(dropped_frames_win, 0, sizeof(dropped_frames_win));
+    dropped_frames_idx = 0;
+    dropped_frames_count = 0;
+    dropped_frames_sum = 0;
+    g_ui_dropped_frame_average = 0.0f;
 }

@@ -31,13 +31,13 @@
 #ifndef XEMU_VBLANK_CALIBRATION_H
 #define XEMU_VBLANK_CALIBRATION_H
 
-#include <stdbool.h>
-#include <stdint.h>
 #include <SDL3/SDL.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+extern float g_ui_dropped_frame_average;
 
 /**
  * Perform vblank interval calibration.
