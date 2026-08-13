@@ -867,8 +867,9 @@ static void gl_render_frame(struct xemu_console *scon)
         vblank_await_next();
     }
 
+    int64_t pre_swap = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     SDL_GL_SwapWindow(scon->real_window);
-    vblank_notify_swap_complete();
+    vblank_notify_swap_complete(pre_swap);
     assert(glGetError() == GL_NO_ERROR);
 
     qatomic_set(&rendering, false);

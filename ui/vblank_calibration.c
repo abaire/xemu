@@ -60,6 +60,14 @@ static VBlankCalibration g_vblank_cal;
 
 float g_ui_dropped_frame_average = 0.0f;
 
+float g_swap_time_average = 0.0f;
+uint64_t g_long_swap_count = 0;
+static int swap_duration_win[DROPPED_FRAMES_WINDOW_SIZE];
+static int swap_duration_idx = 0;
+static int swap_duration_count = 0;
+static int swap_duration_sum = 0;
+
+
 static int dropped_frames_win[DROPPED_FRAMES_WINDOW_SIZE];
 static int dropped_frames_idx = 0;
 static int dropped_frames_count = 0;
@@ -200,10 +208,29 @@ void vblank_await_next(void)
     }
 }
 
-void vblank_notify_swap_complete(void)
+void vblank_notify_swap_complete(int64_t pre_swap_ns)
 {
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    int64_t elapsed_ns = now - pre_swap_ns;
+
+    if (elapsed_ns > VBLANK_TARGET_HEADROOM_NS) {
+        ++g_long_swap_count;
+    }
+
+    if (swap_duration_count == DROPPED_FRAMES_WINDOW_SIZE) {
+        swap_duration_sum -= swap_duration_win[swap_duration_idx];
+    } else {
+        swap_duration_count++;
+    }
+
+    swap_duration_win[swap_duration_idx] = elapsed_ns;
+    swap_duration_sum += elapsed_ns;
+    swap_duration_idx = (swap_duration_idx + 1) % DROPPED_FRAMES_WINDOW_SIZE;
+
+    g_swap_time_average = (float)swap_duration_sum / swap_duration_count;
+
     if (g_vblank_cal.calibrated) {
-        g_vblank_cal.last_swap_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        g_vblank_cal.last_swap_time_ns = now;
     }
 }
 
@@ -218,4 +245,11 @@ void vblank_calibration_reset(void)
     dropped_frames_count = 0;
     dropped_frames_sum = 0;
     g_ui_dropped_frame_average = 0.0f;
+
+    memset(swap_duration_win, 0, sizeof(swap_duration_win));
+    swap_duration_idx = 0;
+    swap_duration_count = 0;
+    swap_duration_sum = 0;
+    g_swap_time_average = 0.0f;
+    g_long_swap_count = 0;
 }

@@ -333,7 +333,9 @@ static void fps_overlay()
     ImGui::SetNextWindowBgAlpha(0.7f);
     if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
         ImGui::Text("UI FPS: %.1f", io.Framerate);
-        ImGui::Text("UI dropped frames: %.1f", g_ui_dropped_frame_average);
+        ImGui::Text("UI dropped frames avg: %.1f", g_ui_dropped_frame_average);
+        ImGui::Text("Swap time avg: %.5f ms", g_swap_time_average / 1000000);
+        ImGui::Text("Long swaps: %" PRIu64, g_long_swap_count);
         ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
     }
     ImGui::End();

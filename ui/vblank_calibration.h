@@ -38,6 +38,8 @@ extern "C" {
 #endif
 
 extern float g_ui_dropped_frame_average;
+extern float g_swap_time_average;
+extern uint64_t g_long_swap_count;
 
 /**
  * Perform vblank interval calibration.
@@ -57,7 +59,7 @@ void vblank_await_next(void);
  * Record the completion time of SDL_GL_SwapWindow. Call immediately after
  * swap returns.
  */
-void vblank_notify_swap_complete(void);
+void vblank_notify_swap_complete(int64_t pre_swap_ns);
 
 /**
  * Reset/invalidate calibration data.
