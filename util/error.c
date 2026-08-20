@@ -34,10 +34,14 @@ static void error_handle(Error **errp, Error *err)
         if (err->hint) {
             error_printf("%s", err->hint->str);
         }
+        fflush(stdout);
+        fflush(stderr);
+        fprintf(stderr, "Critical error detected, aborting\n\n");
         abort();
     }
     if (errp == &error_fatal) {
         error_report_err(err);
+        fprintf(stderr, "Fatal error detected, exiting\n\n");
         exit(1);
     }
     if (errp && !*errp) {
