@@ -39,6 +39,7 @@
 #include "ui/console.h"
 #include "ui/input.h"
 #include "ui/kbd-state.h"
+#include "system/cpu-timers.h"
 #include "system/runstate.h"
 #include "system/runstate-action.h"
 #include "system/system.h"
@@ -130,6 +131,7 @@ void xemu_main_loop_lock(void)
 {
     qemu_mutex_lock_main_loop();
     bql_lock();
+    cpu_disable_ticks();
 #if DEBUG_XEMU_C
     lock_start = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 #endif
@@ -140,6 +142,7 @@ void xemu_main_loop_unlock(void)
 #if DEBUG_XEMU_C
     lock_held_acc += qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - lock_start;
 #endif
+    cpu_enable_ticks();
     bql_unlock();
     qemu_mutex_unlock_main_loop();
 }
