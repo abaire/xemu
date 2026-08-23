@@ -535,11 +535,27 @@ static void handle_windowevent(SDL_Event *ev)
 
 #ifdef _WIN32
             if (win32_dxgi_present_is_active()) {
-                win32_dxgi_present_resize(ev->window.data1, ev->window.data2);
+                int width;
+                int height;
+                if (!SDL_GetWindowSizeInPixels(scon->real_window, &width,
+                                               &height)) {
+                    fprintf(stderr, "SDL_GetWindowSizeInPixels failed "
+                                    "responding to resize event.\n");
+                } else {
+                    win32_dxgi_present_resize(width, height);
+                }
             }
 #endif
         }
         break;
+#ifdef _WIN32
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        if (win32_dxgi_present_is_active()) {
+            win32_dxgi_present_resize(ev->window.data1, ev->window.data2);
+        }
+        break;
+#endif
+
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
     case SDL_EVENT_WINDOW_MOUSE_ENTER:
         if (!gui_grab && (qemu_input_is_absolute(scon->dcl.con) || absolute_enabled)) {
@@ -883,8 +899,10 @@ static void gl_render_frame(struct xemu_console *scon)
     } else {
         static bool warned = false;
         if (!warned) {
-          fprintf(stderr, "win32_dxgi present failed, falling back to SDL_GL_SwapWindow\n");
-          warned = true;
+            fprintf(stderr,
+                    "win32_dxgi present failed or unavailable, falling back to "
+                    "SDL_GL_SwapWindow\n");
+            warned = true;
         }
         SDL_GL_SwapWindow(scon->real_window);
     }
@@ -907,7 +925,15 @@ static bool event_watch_callback(void *userdata, SDL_Event *event)
     if (event->type == SDL_EVENT_WINDOW_RESIZED) {
 #ifdef _WIN32
         if (win32_dxgi_present_is_active()) {
-            win32_dxgi_present_resize(event->window.data1, event->window.data2);
+            int width;
+            int height;
+            if (!SDL_GetWindowSizeInPixels(scon->real_window, &width,
+                                           &height)) {
+                fprintf(stderr, "SDL_GetWindowSizeInPixels failed "
+                                "responding to resize event.\n");
+            } else {
+                win32_dxgi_present_resize(width, height);
+            }
         }
 #endif
         gl_render_frame(scon);

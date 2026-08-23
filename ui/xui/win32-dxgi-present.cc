@@ -279,8 +279,8 @@ bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
     if (!m_wgl_object) {
         fprintf(stderr,
                 "win32_dxgi_present: wglDXRegisterObjectNV failed (GLError=%u, "
-                "WinError=%lu)\n",
-                glGetError(), (unsigned long)GetLastError());
+                "WinError=0x%X)\n",
+                glGetError(), static_cast<unsigned int>(GetLastError()));
         ReleaseSharedResources();
         return false;
     }
@@ -494,8 +494,8 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
     if (!m_wgl_device) {
         fprintf(stderr,
                 "win32_dxgi_present: wglDXOpenDeviceNV failed (GLError=%u, "
-                "WinError=%lu)\n",
-                glGetError(), (unsigned long)GetLastError());
+                "WinError=0x%X)\n",
+                glGetError(), static_cast<unsigned int>(GetLastError()));
         Cleanup();
         return false;
     }
@@ -574,6 +574,14 @@ void Win32DxgiPresenter::EndFrame(bool vsync)
         return;
     }
 
+    if (!m_wgl_dx_lock_objects_nv(m_wgl_device, 1, &m_wgl_object)) {
+        fprintf(stderr,
+                "Win32DxgiPresenter::EndFrame: wglDXLockObjectsNV failed "
+                "(WinError=0x%X)\n",
+                static_cast<unsigned int>(GetLastError()));
+        Cleanup();
+        return;
+    }
     m_wgl_dx_lock_objects_nv(m_wgl_device, 1, &m_wgl_object);
 
     // Blit from render FBO to interop FBO with vertical flip to convert OpenGL
@@ -595,7 +603,14 @@ void Win32DxgiPresenter::EndFrame(bool vsync)
     UINT sync_interval = vsync ? 1 : 0;
     UINT present_flags =
         (!vsync && m_allow_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-    m_swap_chain->Present(sync_interval, present_flags);
+
+    res = m_swap_chain->Present(sync_interval, present_flags);
+    if (FAILED(res)) {
+        fprintf(stderr,
+                "Win32DxgiPresenter::EndFrame: Present failed (hr=0x%08lX)\n",
+                (unsigned long)res);
+        Cleanup();
+    }
 }
 
 void Win32DxgiPresenter::Resize(int width, int height)
