@@ -91,6 +91,7 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
 void pfifo_kick(NV2AState *d)
 {
+    nv2a_profile_inc_counter(NV2A_PROF_PFIFO_KICKS);
     d->pfifo.fifo_kick = true;
     qemu_cond_broadcast(&d->pfifo.fifo_cond);
 }
@@ -472,8 +473,13 @@ void *pfifo_thread(void *arg)
         if (!d->pfifo.fifo_kick) {
             qemu_cond_broadcast(&d->pfifo.fifo_idle_cond);
 
+            int64_t start_time = nv2a_profile_duration_start();
+
             // Both the pusher and puller are waiting for some action
             qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+
+            nv2a_profile_accumulate_duration_us(NV2A_PROF_PFIFO_AWAITING_KICK,
+                                                start_time);
         }
 
         if (d->exiting) {

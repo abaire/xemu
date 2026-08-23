@@ -75,6 +75,8 @@ static void patch_alpha(uint8_t *dest, size_t width_pixels, size_t height,
 
 void pgraph_vk_image_blit(NV2AState *d)
 {
+    int64_t blit_start = nv2a_profile_duration_start();
+
     PGRAPHState *pg = &d->pgraph;
     ContextSurfaces2DState *context_surfaces = &pg->context_surfaces_2d;
     ImageBlitState *image_blit = &pg->image_blit;
@@ -224,4 +226,8 @@ void pgraph_vk_image_blit(NV2AState *d)
                                    DIRTY_MEMORY_VGA);
     memory_region_set_client_dirty(d->vram, dest_addr, clipped_dest_size,
                                    DIRTY_MEMORY_NV2A_TEX);
+
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_IMAGE_BLIT,
+                                        blit_start);
+
 }

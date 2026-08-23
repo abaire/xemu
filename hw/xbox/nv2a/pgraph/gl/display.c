@@ -405,6 +405,7 @@ void pgraph_gl_sync(NV2AState *d)
 
 int pgraph_gl_get_framebuffer_surface(NV2AState *d)
 {
+    int64_t start_time = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
@@ -418,6 +419,8 @@ int pgraph_gl_get_framebuffer_surface(NV2AState *d)
         d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color) {
         qemu_mutex_unlock(&d->pfifo.lock);
+        nv2a_profile_accumulate_duration_us(
+            NV2A_PROF_GL_GET_FRAMEBUFFER_SURFACE, start_time);
         return 0;
     }
 
@@ -435,6 +438,9 @@ int pgraph_gl_get_framebuffer_surface(NV2AState *d)
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&d->pgraph.sync_complete);
+
+    nv2a_profile_accumulate_duration_us(
+        NV2A_PROF_GL_GET_FRAMEBUFFER_SURFACE, start_time);
 
     return r->gl_display_buffer;
 }

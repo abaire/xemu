@@ -53,6 +53,7 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
@@ -61,6 +62,7 @@
 #include <SDL3/SDL.h>
 
 #ifndef DEBUG_XEMU_C
+// DONOTSUBMIT
 #define DEBUG_XEMU_C 0
 #endif
 
@@ -118,6 +120,8 @@ static QEMUTimer *vblank_timer;
 static QemuThread vblank_thread;
 static bool qemu_exiting;
 static int exit_status;
+
+static uint64_t target_frame_interval_ns = 0;
 
 void tcg_register_init_ctx(void); // tcg.c
 
@@ -280,6 +284,44 @@ static void send_mouse_event(struct xemu_console *scon, int dx, int dy,
     qemu_input_event_sync();
 }
 
+static const SDL_DisplayMode *
+get_best_fullscreen_mode(SDL_DisplayMode **modes, int num_modes)
+{
+    static const float TARGET_REFRESH_RATE = 60.f;
+    static const float MIN_REFRESH_RATE = 30.f;
+
+    if (!modes || num_modes <= 0) {
+        return NULL;
+    }
+
+    // First mode is the highest resolution, typically the native resolution
+    const SDL_DisplayMode *mode = modes[0];
+    int screen_width = mode->w;
+    int screen_height = mode->h;
+    float best_refresh_delta = mode->refresh_rate - TARGET_REFRESH_RATE;
+
+    for (int i = 1; i < num_modes; ++i) {
+        const SDL_DisplayMode *candidate = modes[i];
+
+        if (candidate->w < screen_width || candidate->h < screen_height ||
+            candidate->refresh_rate < MIN_REFRESH_RATE) {
+            break;
+        }
+
+        float refresh_delta = candidate->refresh_rate - TARGET_REFRESH_RATE;
+        if (SDL_fabsf(refresh_delta) < SDL_fabsf(best_refresh_delta)) {
+            mode = candidate;
+            best_refresh_delta = refresh_delta;
+        } else if (refresh_delta == best_refresh_delta &&
+                   candidate->format == mode->format &&
+                   candidate->pixel_density > mode->pixel_density) {
+            mode = candidate;
+        }
+    }
+
+    return mode;
+}
+
 static void set_full_screen(struct xemu_console *scon, bool set)
 {
     gui_fullscreen = set;
@@ -292,10 +334,7 @@ static void set_full_screen(struct xemu_console *scon, bool set)
             if (display) {
                 int num_modes = 0;
                 modes = SDL_GetFullscreenDisplayModes(display, &num_modes);
-                if (modes && num_modes > 0) {
-                    // First mode is the highest resolution, typically the native resolution
-                    mode = modes[0];
-                }
+                mode = get_best_fullscreen_mode(modes, num_modes);
             }
             if (mode) {
                 fprintf(stderr, "Selected exclusive fullscreen mode: %dx%d pixel_density=%f refresh_rate=%f\n", mode->w, mode->h, mode->pixel_density, mode->refresh_rate);
@@ -721,6 +760,7 @@ static void update_fps(void)
     fps = 1000.0/avg;
 }
 
+static unsigned int vblank_count = 0;
 static void process_vblank(struct xemu_console *scon)
 {
     assert(bql_locked());
@@ -736,6 +776,7 @@ static void process_vblank(struct xemu_console *scon)
 #endif
 
     graphic_hw_update(scon->dcl.con);
+    ++vblank_count;
 }
 
 static void vblank_timer_callback(void *opaque)
@@ -777,6 +818,9 @@ static void *vblank_timer_thread(void *opaque)
 }
 
 #if DEBUG_XEMU_C
+static uint64_t event_loops_since_update = 0;
+static uint64_t last_forced_delay = 0;
+static uint64_t cumulative_delay = 0;
 static void report_stats(void)
 {
     uint64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
@@ -786,15 +830,23 @@ static void report_stats(void)
     num_frames += 1;
     if (delta_ms >= 1000) {
         DPRINTF("[[ ");
-        DPRINTF("vblank @%fHz avg", fps);
+        DPRINTF("vblank @%fHz avg, %d frames / %llu ms = %f", fps, num_frames, delta_ms, (double)num_frames / ((double)(delta_ms) / 1000.0));
+        DPRINTF(" - last delay %llu, cumulative %llu", last_forced_delay, cumulative_delay);
+        DPRINTF(" - loops %llu", event_loops_since_update);
         DPRINTF(" - bql %"PRId64"ns/iter, %g%% time avg", lock_held_acc/num_frames, (double)lock_held_acc/(double)(delta_ms * 10000.0));
         DPRINTF(" ]]\n");
+
         lock_held_acc = 0;
         last_reported = now;
         num_frames = 0;
+        last_forced_delay = 0;
+        cumulative_delay = 0;
+        event_loops_since_update = 0;
     }
 }
 #endif
+
+static int64_t last_ui_frame_time_ns = 0;
 
 /**
  * Renders the main interface. Usually called from the main thread,
@@ -802,8 +854,11 @@ static void report_stats(void)
  */
 static void gl_render_frame(struct xemu_console *scon)
 {
+    static unsigned int last_guest_frame_sync_vblank_count = 0xFFFF;  // Value must not equal vblank_count initializer.
+    static GLsync frame_sync = NULL;
     static bool rendering;
     if (qatomic_xchg(&rendering, true) || qatomic_read(&qemu_exiting)) {
+        fprintf(stderr, "WARNING: gl_render_frame called while rendering\n");
         return;
     }
 
@@ -812,34 +867,39 @@ static void gl_render_frame(struct xemu_console *scon)
     bool flip_required = false;
     bool release_surface_texture = false;
 
-    /* XXX: Note that this bypasses the usual VGA path in order to quickly
-     * get the surface. This is simple and fast, at the cost of accuracy.
-     * Ideally, this should go through the VGA code and opportunistically pull
-     * the surface like this, but handle the VGA logic as well. For now, just
-     * use this fast path to handle the common case.
-     *
-     * In the event the surface is not found in the surface cache, e.g. when
-     * the guest code isn't using HW accelerated rendering, but just blitting
-     * to the framebuffer, fall back to the VGA path.
-     */
-    GLuint tex = nv2a_get_framebuffer_surface();
+    if (last_guest_frame_sync_vblank_count != vblank_count ||
+        !g_debug_hackery_settings.limit_framebuffer_fetches_to_guest_vblank) {
+        last_guest_frame_sync_vblank_count = vblank_count;
 
-    assert(glGetError() == GL_NO_ERROR);
+        /* XXX: Note that this bypasses the usual VGA path in order to quickly
+         * get the surface. This is simple and fast, at the cost of accuracy.
+         * Ideally, this should go through the VGA code and opportunistically pull
+         * the surface like this, but handle the VGA logic as well. For now, just
+         * use this fast path to handle the common case.
+         *
+         * In the event the surface is not found in the surface cache, e.g. when
+         * the guest code isn't using HW accelerated rendering, but just blitting
+         * to the framebuffer, fall back to the VGA path.
+         */
+        GLuint tex = nv2a_get_framebuffer_surface();
 
-    if (tex == 0) {
-        xemu_main_loop_lock();
-        // FIXME: Don't upload if notdirty
-        xb_surface_gl_create_texture(scon->surface);
-        tex = scon->surface->texture;
-        flip_required = true;
-        release_surface_texture = true;
-        xemu_main_loop_unlock();
+        assert(glGetError() == GL_NO_ERROR);
+
+        if (tex == 0) {
+            xemu_main_loop_lock();
+            // FIXME: Don't upload if notdirty
+            xb_surface_gl_create_texture(scon->surface);
+            tex = scon->surface->texture;
+            flip_required = true;
+            release_surface_texture = true;
+            xemu_main_loop_unlock();
+        }
+
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        xemu_snapshots_set_framebuffer_texture(tex, flip_required);
+        xemu_hud_set_framebuffer_texture(tex, flip_required);
     }
-
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
-    xemu_snapshots_set_framebuffer_texture(tex, flip_required);
-    xemu_hud_set_framebuffer_texture(tex, flip_required);
 
     /* FIXME: Finer locking. Event handlers in segments of the code expect
      * to be running on the main thread with the BQL. For now, acquire the
@@ -851,7 +911,18 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_unlock();
 
     xemu_hud_render();
-    glFinish();
+
+    if (frame_sync) {
+        glClientWaitSync(frame_sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
+        glDeleteSync(frame_sync);
+        frame_sync = NULL;
+    } else if (!g_debug_hackery_settings.fence_sync) {
+        if (g_debug_hackery_settings.flush_instead_of_finish) {
+            glFlush();
+        } else {
+            glFinish();
+        }
+    }
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
@@ -860,8 +931,44 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
     nv2a_release_framebuffer_surface();
+
+    if (last_ui_frame_time_ns) {
+        int64_t next_frame = 0;
+
+        if (g_debug_hackery_settings.adaptive_ui_thread_sleep) {
+            next_frame = last_ui_frame_time_ns + target_frame_interval_ns;
+        } else if (g_debug_hackery_settings.render_frequency_ns) {
+            next_frame = last_ui_frame_time_ns + g_debug_hackery_settings.render_frequency_ns;
+        }
+        next_frame -= (int64_t)g_debug_hackery_settings.ui_throttle_swap_grace_period_microseconds * 1000;
+
+        int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        if (now < next_frame) {
+#if DEBUG_XEMU_C
+            last_forced_delay = next_frame - now;
+            cumulative_delay += last_forced_delay;
+#endif
+            SDL_DelayPrecise(next_frame - now);
+        }
+    }
+
+    int64_t swap_start = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     SDL_GL_SwapWindow(scon->real_window);
+    last_ui_frame_time_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     assert(glGetError() == GL_NO_ERROR);
+
+    // DONOTSUBMIT: Track UI level dropped frames, which may hold the guest
+    // graphics rendering as well.
+    int64_t swap_time = last_ui_frame_time_ns - swap_start;
+    if (swap_time >= target_frame_interval_ns) {
+        nv2a_profile_inc_counter(NV2A_PROF_UI_LONG_SWAPS);
+    }
+    nv2a_profile_inc_counter(NV2A_PROF_UI_SWAPS);
+
+
+    if (g_debug_hackery_settings.fence_sync) {
+        frame_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
 
     qatomic_set(&rendering, false);
 
@@ -1092,7 +1199,17 @@ static void display_early_init(DisplayOptions *o)
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
-    SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
+    int interval = g_config.display.window.vsync ? 1 : 0;
+    fprintf(stderr, "VSYNC setting %s\n", interval ? "ON" : "OFF");
+
+    if (!interval) {
+        SDL_GL_SetSwapInterval(0);
+    } else if (SDL_GL_SetSwapInterval(-1)) {
+        fprintf(stderr, "VSYNC adaptive\n");
+    } else if (!SDL_GL_SetSwapInterval(1)) {
+        fprintf(stderr, "Failed to set swap interval to %d. %s\n", interval,
+                SDL_GetError());
+    }
     xemu_hud_init(m_window, m_context);
 }
 
@@ -1228,7 +1345,7 @@ static const wchar_t *get_executable_name(void)
             return NULL;
         }
 
-        wchar_t *last_slash = wcsrchr(full_path, L'\\');
+        wchar_t *last_slash =  wcsrchr(full_path, L'\\');
         if (last_slash) {
             wcsncpy_s(exe_name, MAX_PATH, last_slash + 1, _TRUNCATE);
         } else {
@@ -1254,7 +1371,6 @@ static void setup_nvidia_profile(void)
             .profile_name = L"xemu",
             .executable_name = exe_name,
             .threaded_optimization = false,
-            .present_method = OGL_CPL_PREFER_DXPRESENT_PREFER_DISABLED,
         });
         nvapi_finalize();
     }
@@ -1365,10 +1481,33 @@ int main(int argc, char **argv)
     xemu_main_loop_unlock();
 
     struct xemu_console *scon = &scon_list[0];
+
+    uint64_t ui_refresh_rate = 60;
+    {
+        // TODO: Handle external changes to display / displaymode.
+        SDL_DisplayID display_idx = SDL_GetDisplayForWindow(m_window);
+        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_idx);
+        if (mode && mode->refresh_rate > 0) {
+            ui_refresh_rate = mode->refresh_rate;
+        }
+    }
+    target_frame_interval_ns = 1000000000ULL / ui_refresh_rate;
+
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
+
         gl_render_frame(scon);
+
+        if (g_debug_hackery_settings.yield_in_event_loop_milliseconds) {
+            SDL_Delay(
+                g_debug_hackery_settings.yield_in_event_loop_milliseconds);
+        }
+
+#if DEBUG_XEMU_C
+        ++event_loops_since_update;
+#endif
     }
+
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
     display_finalize();
