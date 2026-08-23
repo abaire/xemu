@@ -36,7 +36,7 @@
 
 #include "system/blockdev.h"
 
-// #define DEBUG_INPUT
+#define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
 #define DPRINTF(fmt, ...) \
@@ -102,7 +102,7 @@ static const char **port_index_to_settings_key_map[] = {
 static const char **port_index_to_driver_settings_key_map[] = {
     &g_config.input.bindings.port1_driver,
     &g_config.input.bindings.port2_driver,
-    &g_config.input.bindings.port3_driver, 
+    &g_config.input.bindings.port3_driver,
     &g_config.input.bindings.port4_driver
 };
 
@@ -244,7 +244,7 @@ static const char *get_bound_driver(int port)
     assert(port >= 0 && port <= 3);
     const char *driver = *port_index_to_driver_settings_key_map[port];
 
-    // If the driver in the config is NULL, empty, or unrecognized 
+    // If the driver in the config is NULL, empty, or unrecognized
     // then default to DRIVER_DUKE
     if (driver == NULL)
         return DRIVER_DUKE;
@@ -260,17 +260,57 @@ static const char *get_bound_driver(int port)
 
 static const int port_map[4] = { 3, 4, 1, 2 };
 
-void xemu_input_init(void)
+void xemu_input_early_init(void)
 {
     if (g_config.input.background_input_capture) {
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     }
 
-    if (!SDL_Init(SDL_INIT_GAMEPAD)) {
+    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD,
+                g_config.input.sdl_joystick_thread ? "1" : "0");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI,
+                g_config.input.sdl_hidapi ? "1" : "0");
+
+    // From testcontroller
+    SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "auto");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ROG_CHAKRAM, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_LINUX_DEADZONES, "1");
+
+    SDL_hid_device_info *devs = SDL_hid_enumerate(0, 0);
+    {
+        SDL_hid_device_info *cur_dev = devs;
+
+        fprintf(stderr, "--- HID Enumeration Start ---\n");
+        while (cur_dev) {
+            fprintf(stderr,
+                    "VID: %04hx PID: %04hx | Path: %s | Mfr: %ls | Prod: %ls\n",
+                    cur_dev->vendor_id, cur_dev->product_id,
+                    cur_dev->path ? cur_dev->path : "N/A",
+                    cur_dev->manufacturer_string ?
+                        cur_dev->manufacturer_string :
+                        L"N/A",
+                    cur_dev->product_string ? cur_dev->product_string : L"N/A");
+            cur_dev = cur_dev->next;
+        }
+        fprintf(stderr, "--- HID Enumeration End ---\n");
+
+        if (devs) {
+            SDL_hid_free_enumeration(devs);
+        }
+    }
+
+
+    if (!SDL_InitSubSystem(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "Failed to initialize SDL gamepad subsystem: %s\n", SDL_GetError());
         exit(1);
     }
+    SDL_Log("HIDAPI Enabled: %s", SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI));
+}
 
+void xemu_input_init(void)
+{
     // Create the keyboard input (always first)
     ControllerState *new_con = malloc(sizeof(ControllerState));
     memset(new_con, 0, sizeof(ControllerState));
@@ -476,6 +516,34 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
         }
     } else if (event->type == SDL_EVENT_GAMEPAD_REMAPPED) {
         DPRINTF("Controller Remapped: %d\n", event->gdevice.which);
+    } else if (event->type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || event->type == SDL_EVENT_JOYSTICK_BUTTON_UP) {
+        DPRINTF("CONTROLLER JOYSTICK BUTTON EVENT, IGNORING\n");
+    } else if (event->type == SDL_EVENT_JOYSTICK_ADDED) {
+        DPRINTF("SDL_EVENT_JOYSTICK_ADDED\n");
+
+        SDL_Joystick *joystick = SDL_OpenJoystick(event->jdevice.which);
+        if (joystick) {
+            if(!SDL_IsGamepad(event->jdevice.which))
+            {
+                DPRINTF("Joystick was not a gamepad, closing %s\n", SDL_GetJoystickName(joystick));
+                SDL_CloseJoystick(joystick);
+            }
+            else
+            {
+                DPRINTF("Joystick is a gamepad, leaking reference to %s\n",
+                        SDL_GetJoystickName(joystick));
+            }
+        } else {
+            DPRINTF("Failed to open joystick %d\n", event->jdevice.which);
+        }
+
+
+    } else if (event->type == SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED) {
+        DPRINTF("SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED ignoring\n");
+    } else if (event->type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE) {
+        DPRINTF("SDL_EVENT_GAMEPAD_SENSOR_UPDATE ignoring\n");
+    } else if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        DPRINTF("SDL_EVENT_GAMEPAD_BUTTON_DOWN\n");
     }
 }
 

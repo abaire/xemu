@@ -956,6 +956,8 @@ static void display_very_early_init(DisplayOptions *o)
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 #endif
 
+    SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_DEBUG);
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "Failed to initialize SDL video subsystem: %s\n",
                 SDL_GetError());
@@ -1272,6 +1274,8 @@ static void init_sdl_app_metadata(void)
                                "https://xemu.app");
 }
 
+void xemu_input_early_init(void);
+
 int main(int argc, char **argv)
 {
     QemuThread thread;
@@ -1338,6 +1342,8 @@ int main(int argc, char **argv)
         setup_nvidia_profile();
     }
 #endif
+
+    xemu_input_early_init();
 
     display_very_early_init(NULL);
 
