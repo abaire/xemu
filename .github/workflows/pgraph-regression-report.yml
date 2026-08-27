@@ -1,0 +1,176 @@
+name: PGraph Regression Report
+
+on:
+  workflow_run:
+    workflows: ["PGraph Regression Tests"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  generate-report-and-deploy:
+    name: Generate Diff Report & Deploy Preview
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -y --no-install-recommends \
+            perceptualdiff jq curl git
+
+      - name: Install xemu-dev-pgraph Package
+        run: |
+          pip install git+https://github.com/abaire/xemu-dev_pgraph_test_results.git
+
+      - name: Download PR Metadata Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-metadata
+          path: metadata
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract PR Information
+        id: pr_info
+        run: |
+          PR_NUM=$(jq -r '.pr_number' metadata/pr_meta.json)
+          HEAD_SHA=$(jq -r '.head_sha' metadata/pr_meta.json)
+          REPO_OWNER=$(jq -r '.repo_owner' metadata/pr_meta.json)
+          REPO_NAME=$(jq -r '.repo_name' metadata/pr_meta.json)
+          echo "pr_number=${PR_NUM}" >> $GITHUB_OUTPUT
+          echo "head_sha=${HEAD_SHA}" >> $GITHUB_OUTPUT
+          echo "repo_owner=${REPO_OWNER}" >> $GITHUB_OUTPUT
+          echo "repo_name=${REPO_NAME}" >> $GITHUB_OUTPUT
+          echo "Processing report for PR #${PR_NUM} (${HEAD_SHA})"
+
+      - name: Download All Shard Result Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: shard_results
+          pattern: shard-*-results
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge Shard Results
+        run: |
+          mkdir -p merged_results
+          SHARD_DIRS=$(find shard_results -mindepth 1 -maxdepth 1 -type d)
+          xemu-pgraph-merge --inputs $SHARD_DIRS --output-dir ./merged_results
+
+      - name: Clone Golden Baselines
+        run: |
+          git clone --depth 1 https://github.com/abaire/nxdk_pgraph_tests_golden_results.git golden_results
+          git clone --depth 1 https://github.com/abaire/xemu-nxdk_pgraph_tests_results.git xemu_baseline
+
+      - name: Generate Visual Diff Report
+        run: |
+          mkdir -p preview_site
+          xemu-pgraph-diff \
+            --results-dir ./merged_results \
+            --golden-dir ./golden_results \
+            --xemu-baseline-dir ./xemu_baseline \
+            --output-dir ./preview_site \
+            --branch "pr-${{ steps.pr_info.outputs.pr_number }}"
+
+      - name: Configure SSH Deploy Key
+        if: env.PR_PREVIEWS_SSH_KEY != ''
+        env:
+          PR_PREVIEWS_SSH_KEY: ${{ secrets.PR_PREVIEWS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$PR_PREVIEWS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Deploy Preview to Previews Repository (gh-pages)
+        if: env.PR_PREVIEWS_SSH_KEY != ''
+        env:
+          PR_PREVIEWS_SSH_KEY: ${{ secrets.PR_PREVIEWS_SSH_KEY }}
+          PREVIEWS_REPO: ${{ vars.PR_PREVIEWS_REPO || format('{0}/xemu-pr-previews', steps.pr_info.outputs.repo_owner) }}
+          PR_NUM: ${{ steps.pr_info.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr_info.outputs.head_sha }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p previews_checkout
+          git clone --depth 1 --branch gh-pages "git@github.com:${PREVIEWS_REPO}.git" previews_checkout || \
+          (git clone "git@github.com:${PREVIEWS_REPO}.git" previews_checkout && cd previews_checkout && git checkout -b gh-pages)
+
+          cd previews_checkout
+          TARGET_DIR="pr-previews/pr-${PR_NUM}"
+          rm -rf "$TARGET_DIR"
+          mkdir -p "$TARGET_DIR"
+          cp -r ../preview_site/* "$TARGET_DIR"/
+
+          git add "$TARGET_DIR"
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Deploy PGraph preview for PR #${PR_NUM} (${HEAD_SHA:0:7})"
+            # Push with retry/rebase in case of concurrent runs
+            for i in {1..5}; do
+              git pull --rebase origin gh-pages && git push origin gh-pages && break || sleep 3
+            done
+          fi
+
+      - name: Post or Update Sticky PR Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNum = parseInt('${{ steps.pr_info.outputs.pr_number }}', 10);
+            const owner = '${{ steps.pr_info.outputs.repo_owner }}';
+            const repo = '${{ steps.pr_info.outputs.repo_name }}';
+            const headSha = '${{ steps.pr_info.outputs.head_sha }}';
+            const previewsRepo = process.env.PREVIEWS_REPO || `${owner}/xemu-pr-previews`;
+            const [previewOwner, previewName] = previewsRepo.split('/');
+            const previewUrl = `https://${previewOwner}.github.io/${previewName}/pr-previews/pr-${prNum}/`;
+            const marker = '<!-- pgraph-regression-bot -->';
+
+            const body = [
+              marker,
+              '### 📊 PGraph Test Regression Report',
+              '',
+              `**Commit:** \`${headSha.substring(0, 7)}\``,
+              '',
+              `👉 **[View Interactive Diff Report](${previewUrl})** against Xbox Hardware & Xemu baseline results.`,
+              '',
+              '_This report will update automatically on new commits._'
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNum,
+            });
+
+            const existingComment = comments.find(c => c.body && c.body.includes(marker));
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body,
+              });
+              console.log(`Updated existing sticky comment ${existingComment.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNum,
+                body,
+              });
+              console.log(`Created new sticky comment on PR #${prNum}`);
+            }
+        env:
+          PREVIEWS_REPO: ${{ vars.PR_PREVIEWS_REPO || format('{0}/xemu-pr-previews', steps.pr_info.outputs.repo_owner) }}
