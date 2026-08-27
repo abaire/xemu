@@ -1,0 +1,186 @@
+name: PGraph Regression Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pgraph-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-assets:
+    name: Build xemu & Prepare Test Assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR Code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Cache Compiler Artifacts
+        uses: actions/cache@v5
+        with:
+          path: /tmp/xemu-ccache
+          key: pgraph-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: pgraph-ccache-${{ runner.os }}-
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -y --no-install-recommends \
+            ccache cmake git ninja-build meson nasm gcc-multilib \
+            binutils-mingw-w64-i686 gcc-mingw-w64-i686 g++-mingw-w64-i686 \
+            lz4 flex bison \
+            libepoxy-dev libpixman-1-dev libsdl2-dev libsamplerate0-dev \
+            zlib1g-dev libssl-dev libpcap-dev libslirp-dev libvulkan-dev \
+            libusb-1.0-0-dev libcurl4-gnutls-dev libpipewire-0.3-dev \
+            jq curl
+
+      - name: Build xemu Binary
+        env:
+          CCACHE_DIR: /tmp/xemu-ccache
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          ./build.sh
+          test -f dist/xemu || test -f build/qemu-system-i386
+          mkdir -p assets
+          if [ -f dist/xemu ]; then
+            cp dist/xemu assets/xemu
+          else
+            cp build/qemu-system-i386 assets/xemu
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install xemu-pgraph-ci-tools & Asset Helpers
+        run: |
+          pip install git+https://github.com/abaire/xemu-pgraph-ci-tools.git
+
+      - name: Build Roswell BIOS
+        run: |
+          git clone --depth 1 https://github.com/mborgerson/roswell.git
+          cd roswell
+          cmake -G Ninja -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/toolchain-gcc.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDBG=0 \
+            -DCOVERAGE=OFF \
+            .
+          cmake --build build
+          cd ..
+          if [ ! -f roswell/build/flash.bin ]; then
+            echo "Failed to build roswell/build/flash.bin"
+            exit 1
+          fi
+          cp roswell/build/flash.bin assets/roswell.bin
+
+      - name: Download Latest nxdk_pgraph_tests ISO
+        run: |
+          python3 -c "import shutil, xemu_pgraph_ci_tools.github as g; iso = g.download_tester_iso('assets'); shutil.copy(iso, 'assets/nxdk_pgraph_tests.iso') if iso else exit(1)"
+
+      - name: Download Latest xemu HDD Image
+        run: |
+          python3 -c "import shutil, xemu_pgraph_ci_tools.github as g; hdd = g.download_xemu_hdd('assets'); shutil.copy(hdd, 'assets/xbox_hdd.qcow2') if hdd else exit(1)"
+
+      - name: Download extract-xiso Tool
+        run: |
+          python3 -c "import shutil, os, python_xiso_repacker.util.extract_xiso as e; bin_path = e.ensure_extract_xiso(); shutil.copy(bin_path, 'assets/extract-xiso') if bin_path else exit(1); os.chmod('assets/extract-xiso', 0o755)"
+
+      - name: Save PR Metadata
+        run: |
+          cat <<EOF > assets/pr_meta.json
+          {
+            "pr_number": "${{ github.event.number }}",
+            "head_sha": "${{ github.event.pull_request.head.sha }}",
+            "repo_owner": "${{ github.repository_owner }}",
+            "repo_name": "${{ github.event.repository.name }}"
+          }
+          EOF
+
+      - name: Upload Test Assets Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-assets
+          path: assets/
+          retention-days: 1
+
+  run-shards:
+    name: Run Test Shard ${{ matrix.shard }}/${{ matrix.total_shards }}
+    needs: build-test-assets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        total_shards: [16]
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Headless Graphics, Runtime & Test Dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 libosmesa6 perceptualdiff \
+            libsdl2-2.0-0 libepoxy0 libpixman-1-0 libslirp0 libsamplerate0 \
+            libpipewire-0.3-0 libvulkan1 libpcap0.8 libusb-1.0-0 libcurl4
+
+      - name: Download Test Assets
+        uses: actions/download-artifact@v4
+        with:
+          name: test-assets
+          path: assets
+
+      - name: Install extract-xiso Tool to PATH
+        run: |
+          chmod +x assets/xemu assets/extract-xiso
+          sudo cp assets/extract-xiso /usr/local/bin/extract-xiso
+
+      - name: Install xemu-pgraph-ci-tools Runner Package
+        run: |
+          pip install git+https://github.com/abaire/xemu-pgraph-ci-tools.git
+
+      - name: Execute Sharded Headless Tests
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
+          SDL_AUDIO_DRIVER: "dummy"
+        run: |
+          mkdir -p output_shard_${{ matrix.shard }}
+          xvfb-run -s "-screen 0 1280x720x24" xemu-pgraph-run \
+            --verbose \
+            --snapshot \
+            --timeout 1800 \
+            --stall-timeout 30 \
+            --xemu ./assets/xemu \
+            --bios ./assets/roswell.bin \
+            --hdd ./assets/xbox_hdd.qcow2 \
+            --mcpx '' \
+            --memory 128 \
+            --enable-serial \
+            --iso ./assets/nxdk_pgraph_tests.iso \
+            --shard-index ${{ matrix.shard }} \
+            --shard-count ${{ matrix.total_shards }} \
+            --results-path ./output_shard_${{ matrix.shard }}
+
+      - name: Upload Shard Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}-results
+          path: output_shard_${{ matrix.shard }}/
+          retention-days: 1
+
+      - name: Upload PR Metadata
+        if: matrix.shard == 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-metadata
+          path: assets/pr_meta.json
+          retention-days: 1

@@ -1,0 +1,55 @@
+name: Cleanup PR Preview
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-preview-site:
+    name: Cleanup Preview Site on PR Close
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: previews-gh-pages-write
+      cancel-in-progress: false
+    steps:
+      - name: Configure SSH Deploy Key
+        if: env.PR_PREVIEWS_SSH_KEY != ''
+        env:
+          PR_PREVIEWS_SSH_KEY: ${{ secrets.PR_PREVIEWS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$PR_PREVIEWS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Remove Preview Directory from gh-pages
+        if: env.PR_PREVIEWS_SSH_KEY != ''
+        env:
+          PR_PREVIEWS_SSH_KEY: ${{ secrets.PR_PREVIEWS_SSH_KEY }}
+          PREVIEWS_REPO: ${{ vars.PR_PREVIEWS_REPO || format('{0}/xemu-pr-previews', github.repository_owner) }}
+          PR_NUM: ${{ github.event.number }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p previews_checkout
+          if ! git clone --depth 1 --branch gh-pages "git@github.com:${PREVIEWS_REPO}.git" previews_checkout; then
+            echo "Previews repository or gh-pages branch not available. Nothing to clean up."
+            exit 0
+          fi
+
+          cd previews_checkout
+          TARGET_DIR="pr-previews/pr-${PR_NUM}"
+          if [ -d "$TARGET_DIR" ]; then
+            echo "Removing preview directory: $TARGET_DIR"
+            git rm -rf "$TARGET_DIR"
+            git commit -m "Remove preview directory for closed PR #${PR_NUM}"
+            for i in {1..5}; do
+              git pull --rebase origin gh-pages && git push origin gh-pages && break || sleep 3
+            done
+          else
+            echo "Preview directory $TARGET_DIR not found. Skipping."
+          fi
