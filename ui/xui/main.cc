@@ -43,6 +43,7 @@
 #include "scene.hh"
 #include "scene-manager.hh"
 #include "main-menu.hh"
+#include "../vblank_calibration.h"
 #include "popup-menu.hh"
 #include "notifications.hh"
 #include "monitor.hh"
@@ -322,14 +323,36 @@ void xemu_hud_update(void)
     // if (show_demo) ImGui::ShowDemoWindow(&show_demo);
 }
 
+static void fps_overlay()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiWindowFlags fps_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 60.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+    if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
+        ImGui::Text("UI FPS: %.1f", io.Framerate);
+        ImGui::Text("UI dropped frames avg: %.1f", g_ui_dropped_frame_average);
+        ImGui::Text("Swap time avg: %.5f ms", g_swap_time_average / 1000000);
+        ImGui::Text("Long swaps: %" PRIu64, g_long_swap_count);
+        ImGui::Text("Guest FPS: %d", g_nv2a_stats.increment_fps);
+    }
+    ImGui::End();
+}
+
 void xemu_hud_render()
 {
+    fps_overlay();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     if (g_vsync != g_config.display.window.vsync) {
         g_vsync = g_config.display.window.vsync;
         SDL_GL_SetSwapInterval(g_vsync ? 1 : 0);
+        if (!g_vsync) {
+            vblank_calibration_reset();
+        }
     }
 
     if (g_screenshot_pending) {
