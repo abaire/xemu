@@ -18,6 +18,7 @@
  */
 
 #include "renderer.h"
+#include "gloffscreen.h"
 #include <math.h>
 
 static uint8_t *convert_texture_data__CR8YB8CB8YA8(uint8_t *data_out,
@@ -1034,12 +1035,19 @@ static void destroy_surface_sampler(PGRAPHState *pg)
 
 void pgraph_vk_init_display(PGRAPHState *pg)
 {
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
     create_descriptor_pool(pg);
     create_descriptor_set_layout(pg);
     create_descriptor_sets(pg);
     create_render_pass(pg);
     create_display_pipeline(pg);
     create_surface_sampler(pg);
+
+#if HAVE_EXTERNAL_MEMORY
+    glo_set_current(g_gl_context);
+    glGenFramebuffers(1, &r->display.gl_fbo);
+#endif
 }
 
 void pgraph_vk_finalize_display(PGRAPHState *pg)
@@ -1051,6 +1059,14 @@ void pgraph_vk_finalize_display(PGRAPHState *pg)
     if (r->display.image != VK_NULL_HANDLE) {
         destroy_current_display_image(pg);
     }
+
+#if HAVE_EXTERNAL_MEMORY
+    if (r->display.gl_fbo) {
+        glo_set_current(g_gl_context);
+        glDeleteFramebuffers(1, &r->display.gl_fbo);
+        r->display.gl_fbo = 0;
+    }
+#endif
 
     destroy_surface_sampler(pg);
     destroy_display_pipeline(pg);

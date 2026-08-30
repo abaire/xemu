@@ -36,14 +36,32 @@
 struct _GloContext;
 typedef struct _GloContext GloContext;
 
+
 /* Change current context */
 void glo_set_current(GloContext *context);
 
 /* Check GL Extensions */
-bool glo_check_extension(const char* ext_name);
+bool glo_check_extension(const char *ext_name);
 
-/* Create an OpenGL context */
+/* Create a standalone context */
 GloContext *glo_context_create(void);
+
+/* Create a context sharing resources with another, using shared texture
+ * transfer */
+GloContext *glo_context_create_shared(GloContext *share);
+
+/* Create a context sharing resources with another, using PBO chain transfer */
+GloContext *glo_context_create_pbo(GloContext *share);
+
+/* Push a framebuffer to the transfer queue.
+ * NOTE: Must be called from the context's thread.
+ */
+void glo_context_push_framebuffer(GloContext *context, GLuint fbo,
+                                  GLuint texture, int width, int height,
+                                  GLenum format, GLenum type);
+
+/* Pull the latest framebuffer as a texture for rendering. */
+GLuint glo_context_pull_framebuffer(GloContext *context);
 
 /* Destroy a previously created OpenGL context */
 void glo_context_destroy(GloContext *context);
@@ -52,5 +70,5 @@ void glo_readpixels(GLenum gl_format, GLenum gl_type,
                     unsigned int bytes_per_pixel, unsigned int stride,
                     unsigned int width, unsigned int height, bool vflip,
                     void *data);
- 
+
 #endif /* GLOFFSCREEN_H_ */
