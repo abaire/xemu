@@ -30,6 +30,31 @@
 extern "C" {
 #endif
 
+typedef struct DebugHackerySettings {
+    int target_render_fps;
+    bool adaptive_ui_thread_sleep;
+    int ui_throttle_swap_grace_period_microseconds;
+    bool enable_adaptive_vsync_if_vsync_enabled;
+    int missed_frame_resync_interval;
+
+    int64_t render_frequency_ns;
+} DebugHackerySettings;
+
+extern DebugHackerySettings g_debug_hackery_settings;
+
+typedef struct DebugHackeryProfileInfo {
+    int64_t sleep_resyncs;
+    int64_t slept_frames;
+    int64_t nowait_frames;
+    int64_t last_frame_swap_time;
+    int64_t out_of_time_frames;
+    int64_t last_frame_total_time;
+    int64_t last_sleep_time_ns;
+    int64_t event_driven_updates;
+} DebugHackeryProfileInfo;
+
+extern DebugHackeryProfileInfo g_debug_hackery_profile_info;
+
 // Implemented in xemu.c
 int xemu_is_fullscreen(void);
 void xemu_toggle_fullscreen(void);

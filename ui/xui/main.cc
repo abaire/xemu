@@ -65,6 +65,15 @@ static int g_vsync;
 static GLuint g_tex;
 static bool g_flip_req;
 
+DebugHackerySettings g_debug_hackery_settings = {
+    .target_render_fps = 0,
+    .adaptive_ui_thread_sleep = true,
+    .ui_throttle_swap_grace_period_microseconds = 2000,
+    .enable_adaptive_vsync_if_vsync_enabled = true,
+    .missed_frame_resync_interval = 8,
+};
+
+DebugHackeryProfileInfo g_debug_hackery_profile_info = {0};
 
 static void InitializeStyle()
 {
@@ -322,14 +331,329 @@ void xemu_hud_update(void)
     // if (show_demo) ImGui::ShowDemoWindow(&show_demo);
 }
 
+static void host_vsync_test()
+{
+    const float PAD = 20.0f;
+    const float FLICKER_RECT_W = 8.f;
+    const float FLICKER_RECT_H = 16.f;
+    const float TRACK_OFFSET_Y = FLICKER_RECT_H + 4;
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImVec2 work_pos = viewport->WorkPos;
+    ImVec2 work_size = viewport->WorkSize;
+
+    // Pin window to the bottom right corner
+    ImVec2 window_pos(work_pos.x + work_size.x - PAD,
+                      work_pos.y + work_size.y - PAD - TRACK_OFFSET_Y);
+    ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.8f);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoInputs;
+
+    if (ImGui::Begin("HostVsyncTest", nullptr, flags)) {
+        ImDrawList *draw_list = ImGui::GetWindowDrawList();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        p.y += TRACK_OFFSET_Y;
+
+        const int steps = 60;
+        const float block_w = 4.0f;
+        const float block_h = 16.0f;
+        const float track_w = steps * block_w;
+        const float spacing = 4.0f;
+
+        double t = ImGui::GetTime();
+        int idx_60 = (int)(t * 60.0) % steps;
+        int idx_30 = (int)(t * 30.0) % (steps / 2);
+
+        draw_list->AddRectFilled(p, ImVec2(p.x + track_w, p.y + block_h),
+                                 IM_COL32(50, 50, 50, 255));
+        draw_list->AddRectFilled(
+            ImVec2(p.x, p.y + block_h + spacing),
+            ImVec2(p.x + track_w, p.y + block_h * 2 + spacing),
+            IM_COL32(50, 50, 50, 255));
+
+        ImVec2 p60(p.x + (idx_60 * block_w), p.y);
+        draw_list->AddRectFilled(p60, ImVec2(p60.x + block_w, p60.y + block_h),
+                                 IM_COL32(255, 0, 0, 255));
+
+        ImVec2 p30(p.x + (idx_30 * block_w * 2.0f), p.y + block_h + spacing);
+        draw_list->AddRectFilled(
+            p30, ImVec2(p30.x + block_w * 2.0f, p30.y + block_h),
+            IM_COL32(0, 255, 0, 255));
+
+        ImVec2 flicker_fusion(p.x + track_w - FLICKER_RECT_W * 2.f,
+                              p.y - TRACK_OFFSET_Y);
+        draw_list->AddRectFilled(flicker_fusion,
+                                 ImVec2(flicker_fusion.x + FLICKER_RECT_W,
+                                        flicker_fusion.y + FLICKER_RECT_H),
+                                 IM_COL32(0xBA, 0xBA, 0, 0xFF));
+        draw_list->AddRectFilled(
+            ImVec2(flicker_fusion.x + FLICKER_RECT_W, flicker_fusion.y),
+            ImVec2(flicker_fusion.x + FLICKER_RECT_W * 2.f,
+                   flicker_fusion.y + FLICKER_RECT_H),
+            (idx_60 & 0x01) ? IM_COL32(0xFF, 0, 0, 0xFF) :
+                              IM_COL32(0, 0xFF, 0, 0xFF));
+
+        // Reserve space to ensure the window encapsulates the manually drawn
+        // primitives
+        ImGui::Dummy(ImVec2(track_w, (block_h * 2) + spacing + TRACK_OFFSET_Y));
+    }
+    ImGui::End();
+}
+
+static void apply_debug_settings(DebugHackerySettings &new_state)
+{
+    static constexpr int64_t kOneSecondNanos = 1000000000;
+    bool adaptive_vsync_was_enabled =
+        g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled;
+    g_debug_hackery_settings = new_state;
+
+    g_debug_hackery_settings.render_frequency_ns =
+        new_state.target_render_fps ?
+            kOneSecondNanos /
+                static_cast<int64_t>(new_state.target_render_fps) :
+            0;
+
+    if (g_vsync && adaptive_vsync_was_enabled !=
+        new_state.enable_adaptive_vsync_if_vsync_enabled) {
+
+        if (new_state.enable_adaptive_vsync_if_vsync_enabled) {
+            if (!SDL_GL_SetSwapInterval(-1)) {
+                fprintf(stderr, "VSYNC adaptive failed\n");
+                g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled = false;
+            }
+        } else {
+            SDL_GL_SetSwapInterval(1);
+        }
+    }
+}
+
+static void debug_hackery_overlay(void)
+{
+    static DebugHackerySettings local_state;
+    static bool initialized = false;
+
+    if (!initialized) {
+        local_state = g_debug_hackery_settings;
+        initialized = true;
+    }
+
+    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImVec2 pos(viewport->WorkPos.x + 10.0f,
+               viewport->WorkPos.y + viewport->WorkSize.y - 10.0f);
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+
+    if (ImGui::Begin("Debug Hackery", NULL, flags)) {
+        ImGui::Text("Debug Hackery");
+        ImGui::Separator();
+
+        if (ImGui::BeginTable("##hackery_table", 2)) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Adaptive UI sleep");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Adaptive UI sleep",
+                            &local_state.adaptive_ui_thread_sleep);
+
+            {
+                if (local_state.adaptive_ui_thread_sleep) {
+                    ImGui::BeginDisabled();
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("UI Render FPS");
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(60.0f);
+                if (ImGui::InputInt("##UI Render FPS",
+                                    &local_state.target_render_fps, 0)) {
+                    if (local_state.target_render_fps > 600) {
+                        local_state.target_render_fps = 600;
+                    }
+                }
+
+                if (local_state.adaptive_ui_thread_sleep) {
+                    ImGui::EndDisabled();
+                }
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("UI throttle grace period (us)");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt(
+                    "##UI throttle grace period (us)",
+                    &local_state.ui_throttle_swap_grace_period_microseconds,
+                    0)) {
+                if (local_state.ui_throttle_swap_grace_period_microseconds >
+                    16000) {
+                    local_state.ui_throttle_swap_grace_period_microseconds =
+                        16000;
+                }
+            }
+
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Allow tearing on late swaps");
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##Allow tearing on late swaps",
+                            &local_state.enable_adaptive_vsync_if_vsync_enabled);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Missed frames to trigger resync");
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::InputInt(
+                    "##Missed frames to trigger resync",
+                    &local_state.missed_frame_resync_interval,
+                    0)) {
+                if (local_state.missed_frame_resync_interval > 10) {
+                    local_state.missed_frame_resync_interval = 10;
+                }
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::EndTable();
+        }
+
+        bool is_modified =
+            (local_state.ui_throttle_swap_grace_period_microseconds !=
+             g_debug_hackery_settings
+                 .ui_throttle_swap_grace_period_microseconds) ||
+            (local_state.target_render_fps !=
+             g_debug_hackery_settings.target_render_fps) ||
+            (local_state.adaptive_ui_thread_sleep !=
+             g_debug_hackery_settings.adaptive_ui_thread_sleep) ||
+            (local_state.enable_adaptive_vsync_if_vsync_enabled !=
+             g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled) ||
+            (local_state.missed_frame_resync_interval !=
+             g_debug_hackery_settings.missed_frame_resync_interval);
+
+        ImGui::BeginDisabled(!is_modified);
+
+        if (ImGui::Button("Apply")) {
+            apply_debug_settings(local_state);
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            local_state = g_debug_hackery_settings;
+        }
+
+        ImGui::EndDisabled();
+    }
+    ImGui::End();
+}
+
+extern "C" int gui_fullscreen;
+extern "C" volatile int g_guest_fps;
+
+static void fps_overlay()
+{
+    ImGuiIO &io = ImGui::GetIO();
+
+    ImGuiWindowFlags fps_window_flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove;
+
+    static float calculated_width = 0.0f;
+    static const char *header_text =
+        " -- FPS ----------------------------------------- ";
+
+    if (calculated_width == 0.0f) {
+        ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+        calculated_width = ceilf(ImGui::CalcTextSize(header_text).x * 1.5f +
+                                 (ImGui::GetStyle().WindowPadding.x * 2.0f));
+        ImGui::PopFont();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(calculated_width, 0.0f));
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+
+    static char data[1024] = "";
+
+    static int frame_counter = 0;
+    if (frame_counter++ % 10 == 0) {
+        snprintf(data, sizeof(data),
+                 "Window state: %s\n"
+                 "UI FPS: %.1f\n"
+                 "Guest FPS: %d\n"
+                 "Resyncs               : %10lld\n"
+                 "Last frm drv swap (us): %10lld\n"
+                 "Last frm total (us)   : %10lld\n"
+                 "Last app slp (ns)     : %10lld\n"
+                 "Out of time pauses    : %10lld\n"
+                 "app delayed frames    : %10lld\n"
+                 "driver delayed frames : %10lld\n"
+                 "event driven updates  : %10lld",
+                 gui_fullscreen ? (g_config.display.window.fullscreen_exclusive ? "ExFS" : "FS") : "W",
+                 io.Framerate,
+                 g_guest_fps,
+                 g_debug_hackery_profile_info.sleep_resyncs,
+                 g_debug_hackery_profile_info.last_frame_swap_time / 1000,
+                 g_debug_hackery_profile_info.last_frame_total_time / 1000,
+                 g_debug_hackery_profile_info.last_sleep_time_ns,
+                 g_debug_hackery_profile_info.out_of_time_frames,
+                 g_debug_hackery_profile_info.slept_frames,
+                 g_debug_hackery_profile_info.nowait_frames,
+                 g_debug_hackery_profile_info.event_driven_updates
+        );
+    }
+
+    if (ImGui::Begin("FPS Overlay", nullptr, fps_window_flags)) {
+        ImGui::PushFont(g_font_mgr.m_fixed_width_font);
+//        ImGui::TextUnformatted(header_text);
+        ImGui::TextUnformatted(data);
+        ImGui::PopFont();
+    }
+    ImGui::End();
+}
+
 void xemu_hud_render()
 {
+    fps_overlay();
+//    host_vsync_test();
+    debug_hackery_overlay();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     if (g_vsync != g_config.display.window.vsync) {
         g_vsync = g_config.display.window.vsync;
-        SDL_GL_SetSwapInterval(g_vsync ? 1 : 0);
+
+        if (!g_vsync) {
+            SDL_GL_SetSwapInterval(0);
+        } else {
+            if (g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled) {
+                if (!SDL_GL_SetSwapInterval(-1)) {
+                    fprintf(stderr, "VSYNC adaptive failed\n");
+                    g_debug_hackery_settings.enable_adaptive_vsync_if_vsync_enabled = false;
+                    SDL_GL_SetSwapInterval(1);
+                }
+            } else {
+                SDL_GL_SetSwapInterval(1);
+            }
+        }
     }
 
     if (g_screenshot_pending) {
