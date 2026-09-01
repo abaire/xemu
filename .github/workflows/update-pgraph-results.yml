@@ -1,0 +1,33 @@
+name: Update PGraph Results
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+        type: string
+        default: "latest"
+
+jobs:
+  trigger_results:
+    name: Trigger PGraph release tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PGraph Release Tests
+        uses: benc-uk/workflow-dispatch@31e2b3319479a63f0ab15bf800eff9e913504e26 # v1.3.2
+        with:
+          workflow: run_xemu_release_tests.yml
+          repo: ${{ vars.PGRAPH_RESULTS_REPO || 'abaire/xemu-nxdk_pgraph_tests_results' }}
+          token: ${{ secrets.PGRAPH_RESULTS_TOKEN || secrets.XEMU_ROBOT_TOKEN || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          ref: main
+          inputs: |
+            {
+              "xemu_tag": "${{ inputs.tag }}"
+            }

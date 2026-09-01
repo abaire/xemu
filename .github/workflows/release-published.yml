@@ -22,3 +22,11 @@ jobs:
     uses: ./.github/workflows/update-ppa.yml
     with:
       release: ${{ github.event.release.name }}
+
+  update_pgraph_results:
+    name: Update PGraph test results
+    if: ${{ !github.event.release.prerelease }}
+    uses: ./.github/workflows/update-pgraph-results.yml
+    with:
+      tag: ${{ github.event.release.tag_name || github.event.release.name }}
+    secrets: inherit
