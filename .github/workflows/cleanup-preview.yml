@@ -25,7 +25,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Remove Preview Directory from gh-pages
+      - name: Prune and Reset Preview on gh-pages
         if: env.PR_PREVIEWS_SSH_KEY != ''
         env:
           PR_PREVIEWS_SSH_KEY: ${{ secrets.PR_PREVIEWS_SSH_KEY }}
@@ -45,11 +45,19 @@ jobs:
           TARGET_DIR="pr-previews/pr-${PR_NUM}"
           if [ -d "$TARGET_DIR" ]; then
             echo "Removing preview directory: $TARGET_DIR"
-            git rm -rf "$TARGET_DIR"
-            git commit -m "Remove preview directory for closed PR #${PR_NUM}"
-            for i in {1..5}; do
-              git pull --rebase origin gh-pages && git push origin gh-pages && break || sleep 3
-            done
+            rm -rf "$TARGET_DIR"
+
+            mkdir -p pr-previews
+            if [ -z "$(ls -A pr-previews 2>/dev/null)" ]; then
+              touch pr-previews/.gitkeep
+            fi
+
+            # Squash active previews into a clean single orphan commit to drop all historical blobs
+            git checkout --orphan gh-pages-clean
+            git add -A
+            git commit -m "Deploy active PR previews (pruned closed PR #${PR_NUM})"
+            git branch -M gh-pages
+            git push --force origin gh-pages
           else
             echo "Preview directory $TARGET_DIR not found. Skipping."
           fi
