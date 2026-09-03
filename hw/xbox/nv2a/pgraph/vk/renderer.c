@@ -115,6 +115,8 @@ static void pgraph_vk_sync(NV2AState *d)
 
 static void pgraph_vk_process_pending(NV2AState *d)
 {
+    int64_t process_start = nv2a_profile_duration_start();
+
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
 
     if (qatomic_read(&r->downloads_pending) ||
@@ -139,6 +141,8 @@ static void pgraph_vk_process_pending(NV2AState *d)
         qemu_mutex_unlock(&d->pgraph.lock);
         qemu_mutex_lock(&d->pfifo.lock);
     }
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_PROCESS_PENDING,
+                                        process_start);
 }
 
 static void pgraph_vk_flip_stall(NV2AState *d)
@@ -166,11 +170,12 @@ static void pgraph_vk_pre_shutdown_trigger(NV2AState *d)
 
 static void pgraph_vk_pre_shutdown_wait(NV2AState *d)
 {
-    // qemu_event_wait(&d->pgraph.vk_renderer_state->shader_cache_writeback_complete);   
+    // qemu_event_wait(&d->pgraph.vk_renderer_state->shader_cache_writeback_complete);
 }
 
 static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
 {
+    int64_t start_time = nv2a_profile_duration_start();
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -183,6 +188,10 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
         d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color) {
         qemu_mutex_unlock(&d->pfifo.lock);
+
+        nv2a_profile_accumulate_duration_us(
+            NV2A_PROF_VK_GET_FRAMEBUFFER_SURFACE, start_time);
+
         return 0;
     }
 
@@ -196,10 +205,14 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
     qemu_event_wait(&d->pgraph.sync_complete);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_GET_FRAMEBUFFER_SURFACE,
+                                        start_time);
     return r->display.gl_texture_id;
 #else
     qemu_mutex_unlock(&d->pfifo.lock);
     pgraph_vk_wait_for_surface_download(surface);
+    nv2a_profile_accumulate_duration_us(NV2A_PROF_VK_GET_FRAMEBUFFER_SURFACE,
+                                        start_time);
     return 0;
 #endif
 }
