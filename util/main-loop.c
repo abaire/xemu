@@ -557,10 +557,8 @@ static int os_host_main_loop_wait(int64_t timeout)
     nfds = pollfds_fill(gpollfds, &rfds, &wfds, &xfds);
     if (nfds >= 0) {
         select_ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv0);
-        if (select_ret != 0) {
-            timeout = 0;
-        }
         if (select_ret > 0) {
+            timeout = 0;
             pollfds_poll(gpollfds, nfds, &rfds, &wfds, &xfds);
         }
     }
@@ -618,11 +616,15 @@ static int os_host_main_loop_wait(int64_t timeout)
     for (pe = first_polling_entry; pe != NULL; pe = pe->next) {
         ret |= pe->func(pe->opaque);
     }
-    
+
     g_main_context_release(context);
-    
+
     if (ret != 0) {
         return ret;
+    }
+
+    if (g_poll_ret < 0) {
+        return g_poll_ret;
     }
 
     return select_ret || g_poll_ret;
