@@ -157,6 +157,10 @@ typedef struct PGRAPHState {
     SurfaceShape surface_shape;
     SurfaceShape last_surface_shape;
 
+    uint32_t kelvin_state[0x800];
+    bool kelvin_state_valid[0x800];
+
+
     struct {
         int clip_x;
         int clip_width;
@@ -282,6 +286,8 @@ void pgraph_pre_savevm_trigger(NV2AState *d);
 void pgraph_pre_savevm_wait(NV2AState *d);
 void pgraph_pre_shutdown_trigger(NV2AState *d);
 void pgraph_pre_shutdown_wait(NV2AState *d);
+void pgraph_dump_state(NV2AState *d);
+
 
 int pgraph_method(NV2AState *d, unsigned int subchannel, unsigned int method,
                   uint32_t parameter, uint32_t *parameters,
