@@ -11,6 +11,7 @@ on:
       pkg_version:
         description: Build version
         value: ${{ jobs.source.outputs.pkg_version }}
+  workflow_dispatch:
 
 jobs:
   source:
