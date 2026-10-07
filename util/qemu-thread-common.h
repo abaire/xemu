@@ -38,6 +38,7 @@ static inline void qemu_mutex_post_lock(QemuMutex *mutex,
 #ifdef CONFIG_DEBUG_MUTEX
     mutex->file = file;
     mutex->line = line;
+    qemu_thread_get_self(&mutex->owner);
 #endif
     trace_qemu_mutex_locked(mutex, file, line);
     if (mutex_is_bql(mutex)) {
