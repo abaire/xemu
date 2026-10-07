@@ -22,7 +22,7 @@
 #include <pthread_np.h>
 #endif
 
-static bool name_threads;
+static bool name_threads = true;
 
 void qemu_thread_naming(bool enable)
 {
