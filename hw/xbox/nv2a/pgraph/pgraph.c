@@ -514,18 +514,26 @@ static const struct {
 #undef DEF_METHOD_CASE_4_OFFSET
 #undef DEF_METHOD_CASE_4
 
+static unsigned int s_last_method = 0;
+static unsigned int s_last_count = 0;
+
+static void pgraph_method_log_reset(void)
+{
+    s_last_method = 0;
+    s_last_count = 0;
+}
+
 static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter)
 {
     const char *method_name = "?";
-    static unsigned int last = 0;
-    static unsigned int count = 0;
 
-    if (last == NV097_ARRAY_ELEMENT16 && method != last) {
+    if (s_last_method == NV097_ARRAY_ELEMENT16 && method != s_last_method) {
         method_name = "NV097_ARRAY_ELEMENT16";
-        trace_nv2a_pgraph_method_abbrev(subchannel, graphics_class, last,
-                                        method_name, count);
+        trace_nv2a_pgraph_method_abbrev(subchannel, graphics_class,
+                                        s_last_method, method_name,
+                                        s_last_count);
     }
 
     if (method != NV097_ARRAY_ELEMENT16) {
@@ -549,12 +557,137 @@ static void pgraph_method_log(unsigned int subchannel,
                                  method_name, offset, parameter);
     }
 
-    if (method == last) {
-        count++;
+    if (method == s_last_method) {
+        s_last_count++;
     } else {
-        count = 0;
+        s_last_count = 0;
     }
-    last = method;
+    s_last_method = method;
+}
+
+static void pgraph_state_method_track(PGRAPHState *pg, unsigned int subchannel,
+                                      unsigned int graphics_class,
+                                      unsigned int method, uint32_t parameter)
+{
+    if (graphics_class == NV_KELVIN_PRIMITIVE) {
+        if (method / 4 < ARRAY_SIZE(pg->kelvin_state)) {
+            pg->kelvin_state[method / 4] = parameter;
+            pg->kelvin_state_valid[method / 4] = true;
+        }
+    }
+}
+
+static bool is_state_dump_ignored_method(uint32_t method)
+{
+    switch (method) {
+    case NV097_CLEAR_SURFACE:
+    case NV097_SET_BEGIN_END:
+    case NV097_FLIP_INCREMENT_WRITE:
+    case NV097_FLIP_STALL:
+    case NV097_NO_OPERATION:
+    case NV097_BACK_END_WRITE_SEMAPHORE_RELEASE:
+    case NV097_WAIT_FOR_IDLE:
+    case NV097_INLINE_ARRAY:
+    case NV097_ARRAY_ELEMENT16:
+    case NV097_ARRAY_ELEMENT32:
+        return true;
+    default:
+        break;
+    }
+
+    /* Streamed methods handled explicitly via dedicated state arrays */
+    if (method >= NV097_SET_TRANSFORM_PROGRAM &&
+        method < (NV097_SET_TRANSFORM_PROGRAM +
+                  NV2A_MAX_TRANSFORM_PROGRAM_LENGTH * VSH_TOKEN_SIZE * 4)) {
+        return true;
+    }
+    if (method >= NV097_SET_TRANSFORM_CONSTANT &&
+        method < (NV097_SET_TRANSFORM_CONSTANT +
+                  NV2A_VERTEXSHADER_CONSTANTS * 4 * 4)) {
+        return true;
+    }
+    return false;
+}
+
+void pgraph_dump_context(NV2AState *d)
+{
+    if (!d) {
+        return;
+    }
+
+    PGRAPHState *pg = &d->pgraph;
+
+    pgraph_method_log_reset();
+
+    trace_nv2a_pgraph_context_marker(
+        "=== START NV2A PGRAPH CONTEXT "
+        "(INITIAL HARDWARE STATE, NOT PART OF DRAW) ===");
+
+    /* 1. Walk kelvin_state array */
+    for (size_t i = 0; i < ARRAY_SIZE(pg->kelvin_state); ++i) {
+        uint32_t method = i * 4;
+        if (pg->kelvin_state_valid[i] &&
+            !is_state_dump_ignored_method(method)) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE, method,
+                              pg->kelvin_state[i]);
+        }
+    }
+
+    /* 2. Vertex shader program data */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                      NV097_SET_TRANSFORM_PROGRAM_LOAD, 0);
+    for (int inst = 0; inst < NV2A_MAX_TRANSFORM_PROGRAM_LENGTH; ++inst) {
+        for (int tok = 0; tok < VSH_TOKEN_SIZE; ++tok) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_TRANSFORM_PROGRAM,
+                              pg->program_data[inst][tok]);
+        }
+    }
+
+    /* 3. Vertex shader constants */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                      NV097_SET_TRANSFORM_CONSTANT_LOAD, 0);
+    for (int c = 0; c < NV2A_VERTEXSHADER_CONSTANTS; ++c) {
+        for (int w = 0; w < 4; ++w) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_TRANSFORM_CONSTANT,
+                              pg->vsh_constants[c][w]);
+        }
+    }
+
+    /* 4. Lighting contexts */
+    for (int slot = 0; slot < NV2A_LTCTXA_COUNT; ++slot) {
+        for (int w = 0; w < 4; ++w) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_LIGHT_AMBIENT_COLOR + slot * 16 + w * 4,
+                              pg->ltctxa[slot][w]);
+        }
+    }
+
+    /* 5. Vertex attributes */
+    for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; ++i) {
+        VertexAttribute *va = &pg->vertex_attributes[i];
+        uint32_t fmt_val = (va->format & 0xF) | ((va->size & 0xF) << 4) |
+                           ((va->count & 0xF) << 8) |
+                           ((va->stride & 0xFFFF) << 16);
+        pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                          NV097_SET_VERTEX_DATA_ARRAY_FORMAT + i * 4, fmt_val);
+        uint32_t off_val =
+            (va->offset & 0x7FFFFFFF) | (va->dma_select ? 0x80000000 : 0);
+        pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                          NV097_SET_VERTEX_DATA_ARRAY_OFFSET + i * 4, off_val);
+    }
+
+    /* 6. Surfaces */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_COLOR_OFFSET,
+                      (uint32_t)pg->surface_color.offset);
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_ZETA_OFFSET,
+                      (uint32_t)pg->surface_zeta.offset);
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_PITCH,
+                      (pg->surface_color.pitch & 0xFFFF) |
+                          ((pg->surface_zeta.pitch & 0xFFFF) << 16));
+
+    trace_nv2a_pgraph_context_marker("=== END NV2A PGRAPH CONTEXT ===\n\n\n\n");
 }
 
 static void pgraph_method_inc(MethodFunc handler, uint32_t end,
@@ -570,6 +703,8 @@ static void pgraph_method_inc(MethodFunc handler, uint32_t end,
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
         method += 4;
@@ -589,6 +724,8 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
     }
@@ -670,6 +807,8 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
 
     pgraph_method_log(subchannel, graphics_class, method, parameter);
+    pgraph_state_method_track(pg, subchannel, graphics_class, method,
+                              parameter);
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d

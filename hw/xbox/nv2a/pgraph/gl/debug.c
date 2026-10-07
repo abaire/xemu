@@ -174,6 +174,7 @@ void gl_debug_frame_terminator(void)
                 if (!capturing) {
                     if (renderdoc_trace_frames) {
                         trace_enable_events("nv2a_pgraph_*");
+                        pgraph_dump_context(g_nv2a);
                     }
                     rdoc_api->StartFrameCapture(NULL, NULL);
                     GLenum error = glGetError();
