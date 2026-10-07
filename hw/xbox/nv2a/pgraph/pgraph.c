@@ -514,18 +514,26 @@ static const struct {
 #undef DEF_METHOD_CASE_4_OFFSET
 #undef DEF_METHOD_CASE_4
 
+static unsigned int s_last_method = 0;
+static unsigned int s_last_count = 0;
+
+static void pgraph_method_log_reset(void)
+{
+    s_last_method = 0;
+    s_last_count = 0;
+}
+
 static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter)
 {
     const char *method_name = "?";
-    static unsigned int last = 0;
-    static unsigned int count = 0;
 
-    if (last == NV097_ARRAY_ELEMENT16 && method != last) {
+    if (s_last_method == NV097_ARRAY_ELEMENT16 && method != s_last_method) {
         method_name = "NV097_ARRAY_ELEMENT16";
-        trace_nv2a_pgraph_method_abbrev(subchannel, graphics_class, last,
-                                        method_name, count);
+        trace_nv2a_pgraph_method_abbrev(subchannel, graphics_class,
+                                        s_last_method, method_name,
+                                        s_last_count);
     }
 
     if (method != NV097_ARRAY_ELEMENT16) {
@@ -549,12 +557,146 @@ static void pgraph_method_log(unsigned int subchannel,
                                  method_name, offset, parameter);
     }
 
-    if (method == last) {
-        count++;
+    if (method == s_last_method) {
+        s_last_count++;
     } else {
-        count = 0;
+        s_last_count = 0;
     }
-    last = method;
+    s_last_method = method;
+}
+
+static void pgraph_state_method_track(PGRAPHState *pg, unsigned int subchannel,
+                                      unsigned int graphics_class,
+                                      unsigned int method, uint32_t parameter)
+{
+    if (graphics_class == NV_KELVIN_PRIMITIVE) {
+        if (method / 4 < ARRAY_SIZE(pg->kelvin_state)) {
+            pg->kelvin_state[method / 4] = parameter;
+            pg->kelvin_state_valid[method / 4] = true;
+        }
+    }
+}
+
+static bool is_state_dump_ignored_method(uint32_t method)
+{
+    switch (method) {
+    case NV097_CLEAR_SURFACE:
+    case NV097_SET_BEGIN_END:
+    case NV097_FLIP_INCREMENT_WRITE:
+    case NV097_FLIP_STALL:
+    case NV097_NO_OPERATION:
+    case NV097_BACK_END_WRITE_SEMAPHORE_RELEASE:
+    case NV097_WAIT_FOR_IDLE:
+    case NV097_INLINE_ARRAY:
+    case NV097_ARRAY_ELEMENT16:
+    case NV097_ARRAY_ELEMENT32:
+        return true;
+    default:
+        break;
+    }
+
+    /* Streamed methods handled explicitly via dedicated state arrays */
+    if (method >= NV097_SET_TRANSFORM_PROGRAM &&
+        method < (NV097_SET_TRANSFORM_PROGRAM +
+                  NV2A_MAX_TRANSFORM_PROGRAM_LENGTH * VSH_TOKEN_SIZE * 4)) {
+        return true;
+    }
+    if (method >= NV097_SET_TRANSFORM_CONSTANT &&
+        method < (NV097_SET_TRANSFORM_CONSTANT +
+                  NV2A_VERTEXSHADER_CONSTANTS * 4 * 4)) {
+        return true;
+    }
+    return false;
+}
+
+void pgraph_dump_context(NV2AState *d)
+{
+    if (!d) {
+        return;
+    }
+
+    PGRAPHState *pg = &d->pgraph;
+
+    pgraph_method_log_reset();
+
+    trace_nv2a_pgraph_context_marker(
+        "=== START NV2A PGRAPH CONTEXT "
+        "(INITIAL HARDWARE STATE, NOT PART OF DRAW) ===");
+
+    /* 1. Walk kelvin_state array */
+    for (size_t i = 0; i < ARRAY_SIZE(pg->kelvin_state); ++i) {
+        uint32_t method = i * 4;
+        if (pg->kelvin_state_valid[i] &&
+            !is_state_dump_ignored_method(method)) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE, method,
+                              pg->kelvin_state[i]);
+        }
+    }
+
+    /* 2. Vertex shader program data */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                      NV097_SET_TRANSFORM_PROGRAM_LOAD, 0);
+    for (int inst = 0; inst < NV2A_MAX_TRANSFORM_PROGRAM_LENGTH; ++inst) {
+        for (int tok = 0; tok < VSH_TOKEN_SIZE; ++tok) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_TRANSFORM_PROGRAM,
+                              pg->program_data[inst][tok]);
+        }
+    }
+
+    /* 3. Vertex shader constants */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                      NV097_SET_TRANSFORM_CONSTANT_LOAD, 0);
+    for (int c = 0; c < NV2A_VERTEXSHADER_CONSTANTS; ++c) {
+        for (int w = 0; w < 4; ++w) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_TRANSFORM_CONSTANT,
+                              pg->vsh_constants[c][w]);
+        }
+    }
+
+    /* 4. Lighting contexts */
+    for (int slot = 0; slot < NV2A_LTCTXA_COUNT; ++slot) {
+        for (int w = 0; w < 4; ++w) {
+            pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                              NV097_SET_LIGHT_AMBIENT_COLOR + slot * 16 + w * 4,
+                              pg->ltctxa[slot][w]);
+        }
+    }
+
+    /* 5. Vertex attributes */
+    for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; ++i) {
+        VertexAttribute *va = &pg->vertex_attributes[i];
+        uint32_t fmt_val = (va->format & 0xF) | ((va->size & 0xF) << 4) |
+                           ((va->count & 0xF) << 8) |
+                           ((va->stride & 0xFFFF) << 16);
+        pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                          NV097_SET_VERTEX_DATA_ARRAY_FORMAT + i * 4, fmt_val);
+        uint32_t off_val =
+            (va->offset & 0x7FFFFFFF) | (va->dma_select ? 0x80000000 : 0);
+        pgraph_method_log(0, NV_KELVIN_PRIMITIVE,
+                          NV097_SET_VERTEX_DATA_ARRAY_OFFSET + i * 4, off_val);
+    }
+
+    /* 6. Surfaces */
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_COLOR_OFFSET,
+                      (uint32_t)pg->surface_color.offset);
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_ZETA_OFFSET,
+                      (uint32_t)pg->surface_zeta.offset);
+    pgraph_method_log(0, NV_KELVIN_PRIMITIVE, NV097_SET_SURFACE_PITCH,
+                      (pg->surface_color.pitch & 0xFFFF) |
+                          ((pg->surface_zeta.pitch & 0xFFFF) << 16));
+
+    trace_nv2a_pgraph_context_marker("=== END NV2A PGRAPH CONTEXT ===\n\n\n\n");
+}
+
+void nv2a_dump_pgraph_state(void)
+{
+    if (!g_nv2a) {
+        return;
+    }
+
+	pgraph_dump_context(g_nv2a);
 }
 
 static void pgraph_method_inc(MethodFunc handler, uint32_t end,
@@ -570,6 +712,8 @@ static void pgraph_method_inc(MethodFunc handler, uint32_t end,
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
         method += 4;
@@ -589,6 +733,8 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
+            pgraph_state_method_track(pg, subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, parameter);
         }
         handler(METHOD_HANDLER_ARGS);
     }
@@ -670,6 +816,8 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
 
     pgraph_method_log(subchannel, graphics_class, method, parameter);
+    pgraph_state_method_track(pg, subchannel, graphics_class, method,
+                              parameter);
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d
@@ -1739,6 +1887,7 @@ DEF_METHOD(NV097, SET_POINT_SIZE)
 DEF_METHOD_INC(NV097, SET_PROJECTION_MATRIX)
 {
     int slot = (method - NV097_SET_PROJECTION_MATRIX) / 4;
+    NV2A_DPRINTF("NV097_SET_PROJECTION_MATRIX[%d] 0x%X\n", slot, parameter);
     // pg->projection_matrix[slot] = *(float*)&parameter;
     unsigned int row = NV_IGRAPH_XF_XFCTX_PMAT0 + slot/4;
     pg->vsh_constants[row][slot%4] = parameter;
@@ -1748,6 +1897,7 @@ DEF_METHOD_INC(NV097, SET_PROJECTION_MATRIX)
 DEF_METHOD_INC(NV097, SET_MODEL_VIEW_MATRIX)
 {
     int slot = (method - NV097_SET_MODEL_VIEW_MATRIX) / 4;
+    NV2A_DPRINTF("NV097_SET_MODEL_VIEW_MATRIX[%d] 0x%X\n", slot, parameter);
     unsigned int matnum = slot / 16;
     unsigned int entry = slot % 16;
     unsigned int row = NV_IGRAPH_XF_XFCTX_MMAT0 + matnum*8 + entry/4;
@@ -1758,6 +1908,8 @@ DEF_METHOD_INC(NV097, SET_MODEL_VIEW_MATRIX)
 DEF_METHOD_INC(NV097, SET_INVERSE_MODEL_VIEW_MATRIX)
 {
     int slot = (method - NV097_SET_INVERSE_MODEL_VIEW_MATRIX) / 4;
+    NV2A_DPRINTF("NV097_SET_INVERSE_MODEL_VIEW_MATRIX[%d] 0x%X\n", slot,
+                 parameter);
     unsigned int matnum = slot / 16;
     unsigned int entry = slot % 16;
     unsigned int row = NV_IGRAPH_XF_XFCTX_IMMAT0 + matnum*8 + entry/4;
@@ -1768,6 +1920,7 @@ DEF_METHOD_INC(NV097, SET_INVERSE_MODEL_VIEW_MATRIX)
 DEF_METHOD_INC(NV097, SET_COMPOSITE_MATRIX)
 {
     int slot = (method - NV097_SET_COMPOSITE_MATRIX) / 4;
+    NV2A_DPRINTF("NV097_SET_COMPOSITE_MATRIX[%d] 0x%X\n", slot, parameter);
     unsigned int row = NV_IGRAPH_XF_XFCTX_CMAT0 + slot/4;
     pg->vsh_constants[row][slot%4] = parameter;
     pg->vsh_constants_dirty[row] = true;
@@ -1776,6 +1929,7 @@ DEF_METHOD_INC(NV097, SET_COMPOSITE_MATRIX)
 DEF_METHOD_INC(NV097, SET_TEXTURE_MATRIX)
 {
     int slot = (method - NV097_SET_TEXTURE_MATRIX) / 4;
+    NV2A_DPRINTF("NV097_SET_TEXTURE_MATRIX[%d] 0x%X\n", slot, parameter);
     unsigned int tex = slot / 16;
     unsigned int entry = slot % 16;
     unsigned int row = NV_IGRAPH_XF_XFCTX_T0MAT + tex*8 + entry/4;
@@ -1786,6 +1940,7 @@ DEF_METHOD_INC(NV097, SET_TEXTURE_MATRIX)
 DEF_METHOD_INC(NV097, SET_FOG_PARAMS)
 {
     int slot = (method - NV097_SET_FOG_PARAMS) / 4;
+    NV2A_DPRINTF("NV097_SET_FOG_PARAMS[%d] 0x%X\n", slot, parameter);
     if (slot < 2) {
         pgraph_reg_w(pg, NV_PGRAPH_FOGPARAM0 + slot*4, parameter);
     } else {
@@ -1800,6 +1955,7 @@ DEF_METHOD_INC(NV097, SET_FOG_PARAMS)
 DEF_METHOD_INC(NV097, SET_TEXGEN_PLANE_S)
 {
     int slot = (method - NV097_SET_TEXGEN_PLANE_S) / 4;
+    NV2A_DPRINTF("NV097_SET_TEXGEN_PLANE_S[%d] 0x%X\n", slot, parameter);
     unsigned int tex = slot / 16;
     unsigned int entry = slot % 16;
     unsigned int row = NV_IGRAPH_XF_XFCTX_TG0MAT + tex*8 + entry/4;
@@ -1816,6 +1972,7 @@ DEF_METHOD(NV097, SET_TEXGEN_VIEW_MODEL)
 DEF_METHOD_INC(NV097, SET_FOG_PLANE)
 {
     int slot = (method - NV097_SET_FOG_PLANE) / 4;
+    NV2A_DPRINTF("NV097_SET_FOG_PLANE[%d] 0x%X\n", slot, parameter);
     pg->vsh_constants[NV_IGRAPH_XF_XFCTX_FOG][slot] = parameter;
     pg->vsh_constants_dirty[NV_IGRAPH_XF_XFCTX_FOG] = true;
 }
@@ -1930,6 +2087,7 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_PARAMS)
 DEF_METHOD_INC(NV097, SET_SCENE_AMBIENT_COLOR)
 {
     int slot = (method - NV097_SET_SCENE_AMBIENT_COLOR) / 4;
+    NV2A_DPRINTF("NV097_SET_SCENE_AMBIENT_COLOR[%d] 0x%X\n", slot, parameter);
     // ??
     pg->ltctxa[NV_IGRAPH_XF_LTCTXA_FR_AMB][slot] = parameter;
     pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_FR_AMB] = true;
@@ -1938,6 +2096,7 @@ DEF_METHOD_INC(NV097, SET_SCENE_AMBIENT_COLOR)
 DEF_METHOD_INC(NV097, SET_VIEWPORT_OFFSET)
 {
     int slot = (method - NV097_SET_VIEWPORT_OFFSET) / 4;
+    NV2A_DPRINTF("NV097_SET_VIEWPORT_OFFSET[%d] 0x%X\n", slot, parameter);
     pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPOFF][slot] = parameter;
     pg->vsh_constants_dirty[NV_IGRAPH_XF_XFCTX_VPOFF] = true;
 }
@@ -1945,12 +2104,14 @@ DEF_METHOD_INC(NV097, SET_VIEWPORT_OFFSET)
 DEF_METHOD_INC(NV097, SET_POINT_PARAMS)
 {
     int slot = (method - NV097_SET_POINT_PARAMS) / 4;
+    NV2A_DPRINTF("NV097_SET_POINT_PARAMS[%d] 0x%X\n", slot, parameter);
     pg->point_params[slot] = *(float *)&parameter; /* FIXME: Where? */
 }
 
 DEF_METHOD_INC(NV097, SET_EYE_POSITION)
 {
     int slot = (method - NV097_SET_EYE_POSITION) / 4;
+    NV2A_DPRINTF("NV097_SET_EYE_POSITION[%d] 0x%X\n", slot, parameter);
     pg->vsh_constants[NV_IGRAPH_XF_XFCTX_EYEP][slot] = parameter;
     pg->vsh_constants_dirty[NV_IGRAPH_XF_XFCTX_EYEP] = true;
 }
@@ -1958,24 +2119,28 @@ DEF_METHOD_INC(NV097, SET_EYE_POSITION)
 DEF_METHOD_INC(NV097, SET_COMBINER_FACTOR0)
 {
     int slot = (method - NV097_SET_COMBINER_FACTOR0) / 4;
+    NV2A_DPRINTF("NV097_SET_COMBINER_FACTOR0[%d] 0x%X\n", slot, parameter);
     pgraph_reg_w(pg, NV_PGRAPH_COMBINEFACTOR0 + slot*4, parameter);
 }
 
 DEF_METHOD_INC(NV097, SET_COMBINER_FACTOR1)
 {
     int slot = (method - NV097_SET_COMBINER_FACTOR1) / 4;
+    NV2A_DPRINTF("NV097_SET_COMBINER_FACTOR1[%d] 0x%X\n", slot, parameter);
     pgraph_reg_w(pg, NV_PGRAPH_COMBINEFACTOR1 + slot*4, parameter);
 }
 
 DEF_METHOD_INC(NV097, SET_COMBINER_ALPHA_OCW)
 {
     int slot = (method - NV097_SET_COMBINER_ALPHA_OCW) / 4;
+    NV2A_DPRINTF("NV097_SET_COMBINER_ALPHA_OCW[%d] 0x%X\n", slot, parameter);
     pgraph_reg_w(pg, NV_PGRAPH_COMBINEALPHAO0 + slot*4, parameter);
 }
 
 DEF_METHOD_INC(NV097, SET_COMBINER_COLOR_ICW)
 {
     int slot = (method - NV097_SET_COMBINER_COLOR_ICW) / 4;
+    NV2A_DPRINTF("SET_COMBINER_COLOR_ICW[%d] 0x%X\n", slot, parameter);
     pgraph_reg_w(pg, NV_PGRAPH_COMBINECOLORI0 + slot*4, parameter);
 }
 
@@ -1988,6 +2153,7 @@ DEF_METHOD_INC(NV097, SET_COLOR_KEY_COLOR)
 DEF_METHOD_INC(NV097, SET_VIEWPORT_SCALE)
 {
     int slot = (method - NV097_SET_VIEWPORT_SCALE) / 4;
+    NV2A_DPRINTF("SET_VIEWPORT_SCALE[%d] 0x%X\n", slot, parameter);
     pg->vsh_constants[NV_IGRAPH_XF_XFCTX_VPSCL][slot] = parameter;
     pg->vsh_constants_dirty[NV_IGRAPH_XF_XFCTX_VPSCL] = true;
 }
@@ -1998,6 +2164,8 @@ DEF_METHOD_INC(NV097, SET_TRANSFORM_PROGRAM)
 
     int program_load = PG_GET_MASK(NV_PGRAPH_CHEOPS_OFFSET,
                                 NV_PGRAPH_CHEOPS_OFFSET_PROG_LD_PTR);
+    NV2A_DPRINTF("NV097_SET_TRANSFORM_PROGRAM[%d][%d] 0x%X\n", program_load,
+                 slot, parameter);
 
     assert(program_load < NV2A_MAX_TRANSFORM_PROGRAM_LENGTH);
     pg->program_data[program_load][slot%4] = parameter;
@@ -2014,6 +2182,8 @@ DEF_METHOD_INC(NV097, SET_TRANSFORM_CONSTANT)
     int slot = (method - NV097_SET_TRANSFORM_CONSTANT) / 4;
     int const_load = PG_GET_MASK(NV_PGRAPH_CHEOPS_OFFSET,
                               NV_PGRAPH_CHEOPS_OFFSET_CONST_LD_PTR);
+    NV2A_DPRINTF("NV097_SET_TRANSFORM_CONSTANT[%d][%d] 0x%X\n", const_load,
+                 slot % 4, parameter);
 
     assert(const_load < NV2A_VERTEXSHADER_CONSTANTS);
     // VertexShaderConstant *constant = &pg->constants[const_load];
@@ -2030,6 +2200,7 @@ DEF_METHOD_INC(NV097, SET_TRANSFORM_CONSTANT)
 DEF_METHOD_INC(NV097, SET_VERTEX3F)
 {
     int slot = (method - NV097_SET_VERTEX3F) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX3F[%d] 0x%X\n", slot, parameter);
     VertexAttribute *attribute =
         &pg->vertex_attributes[NV2A_VERTEX_ATTR_POSITION];
     pgraph_allocate_inline_buffer_vertices(pg, NV2A_VERTEX_ATTR_POSITION);
@@ -2044,6 +2215,7 @@ DEF_METHOD_INC(NV097, SET_VERTEX3F)
 DEF_METHOD_INC(NV097, SET_BACK_LIGHT_AMBIENT_COLOR)
 {
     int slot = (method - NV097_SET_BACK_LIGHT_AMBIENT_COLOR) / 4;
+    NV2A_DPRINTF("NV097_SET_BACK_LIGHT_AMBIENT_COLOR 0x%X\n", parameter);
     unsigned int part = NV097_SET_BACK_LIGHT_AMBIENT_COLOR / 4 + slot % 16;
     slot /= 16; /* [Light index] */
     assert(slot < 8);
@@ -2082,55 +2254,65 @@ DEF_METHOD_INC(NV097, SET_LIGHT_AMBIENT_COLOR)
     switch(part * 4) {
     case NV097_SET_LIGHT_AMBIENT_COLOR ...
             NV097_SET_LIGHT_AMBIENT_COLOR + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_AMBIENT_COLOR 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_AMBIENT_COLOR / 4;
         pg->ltctxb[NV_IGRAPH_XF_LTCTXB_L0_AMB + slot*6][part] = parameter;
         pg->ltctxb_dirty[NV_IGRAPH_XF_LTCTXB_L0_AMB + slot*6] = true;
         break;
     case NV097_SET_LIGHT_DIFFUSE_COLOR ...
            NV097_SET_LIGHT_DIFFUSE_COLOR + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_DIFFUSE_COLOR 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_DIFFUSE_COLOR / 4;
         pg->ltctxb[NV_IGRAPH_XF_LTCTXB_L0_DIF + slot*6][part] = parameter;
         pg->ltctxb_dirty[NV_IGRAPH_XF_LTCTXB_L0_DIF + slot*6] = true;
         break;
     case NV097_SET_LIGHT_SPECULAR_COLOR ...
             NV097_SET_LIGHT_SPECULAR_COLOR + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_SPECULAR_COLOR 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_SPECULAR_COLOR / 4;
         pg->ltctxb[NV_IGRAPH_XF_LTCTXB_L0_SPC + slot*6][part] = parameter;
         pg->ltctxb_dirty[NV_IGRAPH_XF_LTCTXB_L0_SPC + slot*6] = true;
         break;
     case NV097_SET_LIGHT_LOCAL_RANGE:
+        NV2A_DPRINTF("NV097_SET_LIGHT_LOCAL_RANGE 0x%X\n", parameter);
         pg->ltc1[NV_IGRAPH_XF_LTC1_r0 + slot][0] = parameter;
         pg->ltc1_dirty[NV_IGRAPH_XF_LTC1_r0 + slot] = true;
         break;
     case NV097_SET_LIGHT_INFINITE_HALF_VECTOR ...
             NV097_SET_LIGHT_INFINITE_HALF_VECTOR + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_INFINITE_HALF_VECTOR 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_INFINITE_HALF_VECTOR / 4;
         pg->light_infinite_half_vector[slot][part] = *(float*)&parameter;
         break;
     case NV097_SET_LIGHT_INFINITE_DIRECTION ...
             NV097_SET_LIGHT_INFINITE_DIRECTION + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_INFINITE_DIRECTION 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_INFINITE_DIRECTION / 4;
         pg->light_infinite_direction[slot][part] = *(float*)&parameter;
         break;
     case NV097_SET_LIGHT_SPOT_FALLOFF ...
             NV097_SET_LIGHT_SPOT_FALLOFF + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_SPOT_FALLOFF 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_SPOT_FALLOFF / 4;
         pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_K + slot*2][part] = parameter;
         pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_L0_K + slot*2] = true;
         break;
     case NV097_SET_LIGHT_SPOT_DIRECTION ...
             NV097_SET_LIGHT_SPOT_DIRECTION + 12:
+        NV2A_DPRINTF("NV097_SET_LIGHT_SPOT_DIRECTION 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_SPOT_DIRECTION / 4;
         pg->ltctxa[NV_IGRAPH_XF_LTCTXA_L0_SPT + slot*2][part] = parameter;
         pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_L0_SPT + slot*2] = true;
         break;
     case NV097_SET_LIGHT_LOCAL_POSITION ...
             NV097_SET_LIGHT_LOCAL_POSITION + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_LOCAL_POSITION 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_LOCAL_POSITION / 4;
         pg->light_local_position[slot][part] = *(float*)&parameter;
         break;
     case NV097_SET_LIGHT_LOCAL_ATTENUATION ...
             NV097_SET_LIGHT_LOCAL_ATTENUATION + 8:
+        NV2A_DPRINTF("NV097_SET_LIGHT_LOCAL_ATTENUATION 0x%X\n", parameter);
         part -= NV097_SET_LIGHT_LOCAL_ATTENUATION / 4;
         pg->light_local_attenuation[slot][part] = *(float*)&parameter;
         break;
@@ -2143,6 +2325,7 @@ DEF_METHOD_INC(NV097, SET_LIGHT_AMBIENT_COLOR)
 DEF_METHOD_INC(NV097, SET_VERTEX4F)
 {
     int slot = (method - NV097_SET_VERTEX4F) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX4F[%d] 0x%X\n", slot, parameter);
     VertexAttribute *attribute =
         &pg->vertex_attributes[NV2A_VERTEX_ATTR_POSITION];
     pgraph_allocate_inline_buffer_vertices(pg, NV2A_VERTEX_ATTR_POSITION);
@@ -2407,6 +2590,8 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_COLOR4UB)
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_FORMAT)
 {
     int slot = (method - NV097_SET_VERTEX_DATA_ARRAY_FORMAT) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA_ARRAY_FORMAT[%d] 0x%X\n", slot,
+                 parameter);
     VertexAttribute *attr = &pg->vertex_attributes[slot];
     attr->format = GET_MASK(parameter, NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE);
     attr->count = GET_MASK(parameter, NV097_SET_VERTEX_DATA_ARRAY_FORMAT_SIZE);
@@ -2454,6 +2639,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_FORMAT)
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_OFFSET)
 {
     int slot = (method - NV097_SET_VERTEX_DATA_ARRAY_OFFSET) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA_ARRAY_OFFSET[%d] 0x%X\n", slot,
+                 parameter);
 
     pg->vertex_attributes[slot].dma_select = parameter & 0x80000000;
     pg->vertex_attributes[slot].offset = parameter & 0x7fffffff;
@@ -2685,6 +2872,7 @@ void pgraph_check_within_begin_end_block(PGRAPHState *pg)
 
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 {
+    NV2A_DPRINTF("ARRAY_ELEMENT16 0x%X\n", parameter);
     pgraph_check_within_begin_end_block(pg);
 
     if (pg->draw_arrays_length) {
@@ -2698,6 +2886,7 @@ DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT32)
 {
+    NV2A_DPRINTF("ARRAY_ELEMENT32 0x%X\n", parameter);
     pgraph_check_within_begin_end_block(pg);
 
     if (pg->draw_arrays_length) {
@@ -2755,6 +2944,7 @@ DEF_METHOD(NV097, DRAW_ARRAYS)
 
 DEF_METHOD_NON_INC(NV097, INLINE_ARRAY)
 {
+    NV2A_DPRINTF("INLINE_ARRAY 0x%X\n", parameter);
     pgraph_check_within_begin_end_block(pg);
     assert(pg->inline_array_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_array[pg->inline_array_length++] = parameter;
@@ -2771,6 +2961,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA2F_M)
     int slot = (method - NV097_SET_VERTEX_DATA2F_M) / 4;
     unsigned int part = slot % 2;
     slot /= 2;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA2F_M[%d][%d] 0x%X\n", slot, part,
+                 parameter);
     VertexAttribute *attribute = &pg->vertex_attributes[slot];
     pgraph_allocate_inline_buffer_vertices(pg, slot);
     attribute->inline_value[part] = *(float*)&parameter;
@@ -2787,6 +2979,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA4F_M)
     int slot = (method - NV097_SET_VERTEX_DATA4F_M) / 4;
     unsigned int part = slot % 4;
     slot /= 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA4F_M[%d][%d] 0x%X\n", slot, part,
+                 parameter);
     VertexAttribute *attribute = &pg->vertex_attributes[slot];
     pgraph_allocate_inline_buffer_vertices(pg, slot);
     attribute->inline_value[part] = *(float*)&parameter;
@@ -2798,6 +2992,7 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA4F_M)
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA2S)
 {
     int slot = (method - NV097_SET_VERTEX_DATA2S) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA2S[%d] 0x%X\n", slot, parameter);
     VertexAttribute *attribute = &pg->vertex_attributes[slot];
     pgraph_allocate_inline_buffer_vertices(pg, slot);
     attribute->inline_value[0] = (float)(int16_t)(parameter & 0xFFFF);
@@ -2812,6 +3007,7 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA2S)
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA4UB)
 {
     int slot = (method - NV097_SET_VERTEX_DATA4UB) / 4;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA4UB[%d] 0x%X\n", slot, parameter);
     VertexAttribute *attribute = &pg->vertex_attributes[slot];
     pgraph_allocate_inline_buffer_vertices(pg, slot);
     attribute->inline_value[0] = (parameter & 0xFF) / 255.0;
@@ -2828,6 +3024,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA4S_M)
     int slot = (method - NV097_SET_VERTEX_DATA4S_M) / 4;
     unsigned int part = slot % 2;
     slot /= 2;
+    NV2A_DPRINTF("NV097_SET_VERTEX_DATA4S_M[%d][%d] 0x%X\n", slot, part,
+                 parameter);
     VertexAttribute *attribute = &pg->vertex_attributes[slot];
     pgraph_allocate_inline_buffer_vertices(pg, slot);
 
