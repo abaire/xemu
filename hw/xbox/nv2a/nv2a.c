@@ -575,6 +575,12 @@ static const VMStateDescription vmstate_nv2a = {
         VMSTATE_UINT64_V(ptimer.alarm_time, NV2AState, 4),
         VMSTATE_UINT64_V(ptimer.time_offset, NV2AState, 4),
         VMSTATE_TIMER_V(ptimer.timer, NV2AState, 4),
+
+        // <DONOTSUBMIT>
+        VMSTATE_UINT32_ARRAY_V(pgraph.kelvin_state, NV2AState, 0x800, 5),
+        VMSTATE_BOOL_ARRAY_V(pgraph.kelvin_state_valid, NV2AState, 0x800, 5),
+        // </DONOTSUBMIT>
+
         VMSTATE_END_OF_LIST()
     },
 };
