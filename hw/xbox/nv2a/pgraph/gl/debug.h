@@ -40,6 +40,7 @@ void gl_debug_group_begin(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
 void gl_debug_group_end(void);
 void gl_debug_label(GLenum target, GLuint name, const char *fmt, ...) G_GNUC_PRINTF(3, 4);
 void gl_debug_frame_terminator(void);
+void gl_debug_dump_log(void);
 
 # define NV2A_GL_DPRINTF(cc, format, ...) \
     gl_debug_message(cc, "nv2a: " format, ## __VA_ARGS__)
