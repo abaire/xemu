@@ -513,41 +513,60 @@ static int AdvPlotFormatter(double value, char *buf, int size, void *)
     return snprintf(buf, size, "%.4g", value);
 }
 
+static float GetPlotSampleValue(int counter_idx, int sample_idx)
+{
+    int data_idx = (g_nv2a_stats.frame_ptr + sample_idx) % NV2A_PROF_NUM_FRAMES;
+    if (counter_idx < NV2A_PROF__COUNT) {
+        return g_nv2a_stats.frame_history[data_idx].counters[counter_idx];
+    }
+    return g_nv2a_stats.frame_history[data_idx].mspf;
+}
+
+static float DistanceToSegmentSquared(const ImVec2 &p, const ImVec2 &a,
+                                      const ImVec2 &b)
+{
+    ImVec2 ab(b.x - a.x, b.y - a.y);
+    ImVec2 ap(p.x - a.x, p.y - a.y);
+    float len_sq = ab.x * ab.x + ab.y * ab.y;
+    float t = 0.0f;
+    if (len_sq > 0.0f) {
+        t = std::clamp((ap.x * ab.x + ap.y * ab.y) / len_sq, 0.0f, 1.0f);
+    }
+    float dx = ap.x - ab.x * t;
+    float dy = ap.y - ab.y * t;
+    return dx * dx + dy * dy;
+}
+
 int DebugVideoWindow::FindHoveredPlotLineIndex()
 {
-    ImPlotPoint mouse_pos = ImPlot::GetPlotMousePos();
-    int x_idx = std::round(mouse_pos.x);
+    ImPlotPoint mouse_plot_pos = ImPlot::GetPlotMousePos();
+    ImVec2 mouse_pos = ImGui::GetMousePos();
 
-    if (x_idx < 0 || x_idx >= NV2A_PROF_NUM_FRAMES || mouse_pos.y < 0) {
+    int x_idx = static_cast<int>(std::floor(mouse_plot_pos.x));
+    int first_segment = std::max(0, x_idx - 1);
+    int last_segment = std::min(NV2A_PROF_NUM_FRAMES - 2, x_idx + 1);
+    if (first_segment > last_segment) {
         return -1;
     }
 
-    int data_idx = (g_nv2a_stats.frame_ptr + x_idx) % NV2A_PROF_NUM_FRAMES;
-    float best_dist = 0.1f;
+    float threshold = 6.0f * g_viewport_mgr.m_scale;
+    float best_dist_sq = threshold * threshold;
     int best_item = -1;
-    // Use the same log1p metric as the plot so hover distances are consistent.
-    float log_mouse_y = std::log10(1.0f + std::max(0.0f, (float)mouse_pos.y));
 
     for (int i = 0; i < NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS; ++i) {
         if (!m_counter_visible[i]) {
             continue;
         }
 
-        float val;
-        if (i < NV2A_PROF__COUNT) {
-            val = g_nv2a_stats.frame_history[data_idx].counters[i];
-        } else {
-            val = g_nv2a_stats.frame_history[data_idx].mspf;
-        }
-
-        if (val < 0) {
-            continue;
-        }
-
-        float dist = std::fabs(std::log10(1.0f + val) - log_mouse_y);
-        if (dist < best_dist) {
-            best_dist = dist;
-            best_item = i;
+        for (int s = first_segment; s <= last_segment; ++s) {
+            ImVec2 a = ImPlot::PlotToPixels(s, GetPlotSampleValue(i, s));
+            ImVec2 b =
+                ImPlot::PlotToPixels(s + 1, GetPlotSampleValue(i, s + 1));
+            float dist_sq = DistanceToSegmentSquared(mouse_pos, a, b);
+            if (dist_sq < best_dist_sq) {
+                best_dist_sq = dist_sq;
+                best_item = i;
+            }
         }
     }
 
@@ -568,23 +587,24 @@ void DebugVideoWindow::DrawAdvancedContent()
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Sort");
         ImGui::SameLine();
-        float button_width =
-            ImGui::CalcTextSize("0").x + ImGui::GetStyle().FramePadding.x * 2;
+        float buttons_width = ImGui::CalcTextSize("All").x +
+                              ImGui::CalcTextSize("None").x +
+                              ImGui::GetStyle().FramePadding.x * 4;
         ImGui::SetNextItemWidth(
-            -(button_width * 2 + ImGui::GetStyle().ItemSpacing.x * 2));
+            -(buttons_width + ImGui::GetStyle().ItemSpacing.x * 2));
         int sort_mode = static_cast<int>(m_legend_sort_mode);
         if (ImGui::Combo("##SortMode", &sort_mode, sort_modes,
                          IM_ARRAYSIZE(sort_modes))) {
             m_legend_sort_mode = static_cast<LegendSortMode>(sort_mode);
         }
         ImGui::SameLine();
-        if (ImGui::Button("1")) {
+        if (ImGui::Button("All")) {
             for (int i = 0; i < NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS; ++i) {
                 m_counter_visible[i] = true;
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("0")) {
+        if (ImGui::Button("None")) {
             for (int i = 0; i < NV2A_PROF__COUNT + NUM_EXTRA_COUNTERS; ++i) {
                 m_counter_visible[i] = false;
             }
