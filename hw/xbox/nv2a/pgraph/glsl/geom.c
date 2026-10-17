@@ -20,6 +20,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "geom.h"
 
@@ -107,6 +108,61 @@ bool pgraph_glsl_need_geom(const GeomState *state)
     default:
         return false;
     }
+}
+
+enum ShaderPrimitiveMode
+pgraph_glsl_get_geom_output_primitive(const GeomState *state) {
+    enum ShaderPolygonMode polygon_mode = state->polygon_front_mode;
+
+    /* POINT mode shouldn't require any special work */
+    if (polygon_mode == POLY_MODE_POINT) {
+        return state->primitive_mode;
+    }
+
+    switch (state->primitive_mode) {
+    case PRIM_TYPE_POINTS:
+    case PRIM_TYPE_LINES:
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+        break;
+
+    case PRIM_TYPE_TRIANGLES:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+        if (polygon_mode == POLY_MODE_FILL) {
+            break;
+        }
+        return PRIM_TYPE_LINE_STRIP;
+
+    case PRIM_TYPE_QUADS:
+    case PRIM_TYPE_QUAD_STRIP:
+        if (polygon_mode == POLY_MODE_LINE) {
+            return PRIM_TYPE_LINE_STRIP;
+        }
+
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            break;
+        }
+        if (polygon_mode == POLY_MODE_FILL) {
+            return PRIM_TYPE_TRIANGLE_STRIP;
+        }
+        assert(!"Unsupported geometry shader output configuration");
+        break;
+
+    default:
+        assert(!"Unimplemented geometry shader output configuration");
+        break;
+    }
+
+    return state->primitive_mode;
 }
 
 MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
@@ -297,14 +353,21 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
     assert(layout_in);
     assert(layout_out);
     assert(body);
-    MString *output =
-        mstring_from_fmt("#version %d\n\n"
-                         "%s"
-                         "%s"
-                         "\n"
-                         "#define v_vtxPos v_vtxPos0\n"
-                         "\n",
-                         opts.vulkan ? 450 : 400, layout_in, layout_out);
+
+#define DECL_VSH_REG(prefix, name) \
+    "in vec4 " #prefix "registerState" #name "[];\n" \
+    "out vec4 registerState" #name ";\n"
+
+    MString *output = mstring_from_fmt(
+        "#version %d\n\n"
+        "%s"
+        "%s"
+        DECL_VSH_REGISTER_STATES(v_)
+        "\n"
+        "#define v_vtxPos v_vtxPos0\n"
+        "\n",
+        opts.vulkan ? 450 : 400, layout_in, layout_out);
+#undef DECL_VSH_REG
     pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading, true,
                                true, true);
     pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading,
@@ -355,13 +418,22 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
         "  vtxPos0 = pz[0];\n"
         "  vtxPos1 = pz[1];\n"
         "  vtxPos2 = pz[2];\n"
-        "  triMZ = (isnan(pz[3].x) || isinf(pz[3].x)) ? 0.0 : pz[3].x;\n"
-        "  EmitVertex();\n"
-        "}\n",
+        "  triMZ = (isnan(pz[3].x) || isinf(pz[3].x)) ? 0.0 : pz[3].x;\n",
         provoking_index,
         provoking_index,
         provoking_index,
         provoking_index);
+
+#define DECL_VSH_REG(prefix, name) \
+    "  registerState" #name " = " #prefix "registerState" #name "[index];\n"
+
+    // clang-format off
+    mstring_append(output,
+                   DECL_VSH_REGISTER_STATES(v_)
+                   "  EmitVertex();\n"
+                   "}\n");
+    // clang-format on
+#undef DECL_VSH_REG
 
     if (need_triz || need_quadz) {
         mstring_append(
@@ -440,7 +512,6 @@ MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
             "  triz2 = calc_triz(i0, i2, i3);\n"
             "}\n");
     }
-
     mstring_append_fmt(output,
                        "\n"
                        "void main() {\n"

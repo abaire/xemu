@@ -25,6 +25,7 @@
 
 #include "xemu-version.h"
 #include "ui/xemu-settings.h"
+#include "hw/xbox/nv2a/debug_gl.h"
 #include "hw/xbox/nv2a/pgraph/util.h"
 #include "debug.h"
 #include "renderer.h"
@@ -101,6 +102,13 @@ static void set_texture_sampler_uniforms(ShaderBinding *binding)
         if (texSampLoc >= 0) {
             glUniform1i(texSampLoc, i);
         }
+    }
+
+    GLint registerCarryoverSamplerLoc =
+        glGetUniformLocation(binding->gl_program, "registerCarryoverSampler");
+    if (registerCarryoverSamplerLoc >= 0) {
+        // TODO: Make the 4 a preprocessor definition so it can't get out of sync.
+        glUniform1i(registerCarryoverSamplerLoc, 4);
     }
 }
 
@@ -217,6 +225,12 @@ static void generate_shaders(PGRAPHGLState *r, ShaderBinding *binding)
     key.psh.state = state->psh;
     glAttachShader(program, get_shader_module_for_key(r, &key));
 
+#define DECL_VSH_REG DECL_VSH_VARYING_REG
+    const char *varyings[] = { DECL_VSH_REGISTER_STATES() };
+#undef DECL_VSH_REG
+    glTransformFeedbackVaryings(program, ARRAY_SIZE(varyings), varyings,
+                                GL_INTERLEAVED_ATTRIBS);
+
     /* link the program */
     glLinkProgram(program);
     GLint linked = 0;
@@ -307,7 +321,7 @@ void pgraph_gl_shader_write_cache_reload_list(PGRAPHState *pg)
 
 bool pgraph_gl_shader_load_from_memory(ShaderBinding *binding)
 {
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 
     if (!binding->program) {
         return false;
@@ -707,7 +721,7 @@ void pgraph_gl_shader_cache_to_disk(ShaderBinding *binding)
     GLsizei program_size_copied;
     glGetProgramBinary(binding->gl_program, program_size, &program_size_copied,
                        &binding->program_format, binding->program);
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 
     binding->program_size = program_size_copied;
     binding->cached = true;
@@ -761,7 +775,7 @@ static void apply_uniform_updates(const UniformInfo *info, int *locs,
         }
     }
 
-    assert(glGetError() == GL_NO_ERROR);
+    ASSERT_NO_GL_ERROR();
 }
 
 // FIXME: Dirty tracking

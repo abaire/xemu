@@ -225,4 +225,6 @@ hwaddr nv_clip_gpu_tile_blit(NV2AState *d, hwaddr blit_base_address,
 void ptimer_init(NV2AState *d);
 void ptimer_reset(NV2AState *d);
 
+#define NV2A_VSH_OUTPUT_REGISTER_COUNT 11
+
 #endif
