@@ -131,6 +131,7 @@ get_job_count () {
 job_count="$(get_job_count)" 2>/dev/null
 job_count="${job_count:-${default_job_count}}"
 debug=""
+run_tests=""
 opts=""
 platform="$(uname -s)"
 
@@ -143,6 +144,10 @@ do
         ;;
     '--debug')
         debug="y"
+        shift
+        ;;
+    '-t'|'--test')
+        run_tests="y"
         shift
         ;;
     '-p'*)
@@ -266,6 +271,34 @@ set -x # Print commands from now on
     ${opts} \
     "$@"
 
-time make -j"${job_count}" ${target} 2>&1 | tee build.log
+if test ! -z "$run_tests"; then
+    time make -j"${job_count}" check-unit check-xbox 2>&1 | tee build.log
+    if test "$platform" = "win64-cross"; then
+        # Meson's introspection output is parsed to carry over per-test
+        # timeouts for use in the Windows executor.
+        rm -rf dist-test && mkdir -p dist-test
+        python3 - <(build/pyvenv/bin/meson introspect --tests build) dist-test <<'EOF'
+import json
+import os
+import shutil
+import sys
+tests_json, dest_dir = sys.argv[1:]
+if not os.path.isdir(dest_dir):
+    msg = f"{dest_dir} must exist and be a directory"
+    raise ValueError(msg)
+with open(tests_json) as f:
+    tests = json.load(f)
+with open(os.path.join(dest_dir, 'tests.txt'), 'w') as manifest:
+    for test in tests:
+        exe = test['cmd'][0]
+        if not exe.endswith('.exe') or not {'qemu:unit', 'qemu:xbox'} & set(test['suite']):
+            continue
+        shutil.copy(exe, dest_dir)
+        manifest.write(f"{os.path.basename(exe)} {test['timeout'] or 0}\n")
+EOF
+    fi
+else
+    time make -j"${job_count}" ${target} 2>&1 | tee build.log
 
-"${postbuild}" # call post build functions
+    "${postbuild}" # call post build functions
+fi

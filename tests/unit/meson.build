@@ -166,6 +166,10 @@ endif
 test_env = environment()
 test_env.set('G_TEST_SRCDIR', meson.current_source_dir())
 test_env.set('G_TEST_BUILDDIR', meson.current_build_dir())
+if host_os == 'darwin'
+  macos_arch = host_machine.cpu() == 'aarch64' ? 'arm64' : host_machine.cpu()
+  test_env.prepend('DYLD_FALLBACK_LIBRARY_PATH', meson.project_source_root() / 'macos-libs' / macos_arch / 'opt/local/lib')
+endif
 
 slow_tests = {
   'test-aio-multithread' : 120,

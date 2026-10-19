@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, aarch64]
-        configuration: [debug, release]
+        configuration: [debug, release, test]
     env:
       ARTIFACT_NAME: xemu-ubuntu-${{ matrix.arch }}-${{ matrix.configuration }}
       CCACHE_DIR: /tmp/xemu-ccache
@@ -36,7 +36,12 @@ jobs:
     steps:
     - name: Setup build options
       run: |
-        if [[ "${{ matrix.configuration }}" == "debug" ]]; then
+        if [[ "${{ matrix.configuration }}" == "test" ]]; then
+          opts=(
+            --debug
+            --test
+          )
+        elif [[ "${{ matrix.configuration }}" == "debug" ]]; then
           opts=(
             --debug
           )
@@ -131,6 +136,7 @@ jobs:
         mkdir -p ${CCACHE_DIR}
         ccache -z
     - name: Compile
+      if: ${{ matrix.configuration != 'test' }}
       run: |
         # XXX: dpkg-genbuildinfo takes two minutes on GH runners. Nuke it for now.
         sudo rm /usr/bin/dpkg-genbuildinfo
@@ -142,9 +148,14 @@ jobs:
 
         mkdir -p deb
         mv *.deb *.ddeb deb
+    - name: Run unit tests
+      if: ${{ matrix.configuration == 'test' }}
+      working-directory: src
+      run: ./build.sh ${XEMU_BUILD_OPTIONS}
     - name: Report ccache stats
       run: ccache -s
     - name: Generate AppImage
+      if: ${{ matrix.configuration != 'test' }}
       env:
         VERSION: ${{ inputs.pkg_version }}${{ matrix.configuration == 'debug' && '-dbg' || '' }}
       run: |
@@ -163,11 +174,13 @@ jobs:
         ./linuxdeploy-${{ matrix.arch }}.AppImage --output appimage --appdir appimage \
           --exclude-library 'libglib-2.0.so*'
     - name: Bundle artifacts
+      if: ${{ matrix.configuration != 'test' }}
       run: |
         mkdir -p dist
         tar -czvf ./dist/${{ env.ARTIFACT_NAME }}.tgz --transform "s#^dist#${{ env.ARTIFACT_NAME }}#" deb
         mv xemu-*.AppImage dist
     - name: Upload build artifact
+      if: ${{ matrix.configuration != 'test' }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v4
       with:
         name: ${{ env.ARTIFACT_NAME }}
