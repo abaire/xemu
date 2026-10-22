@@ -55,6 +55,43 @@ DEFINE_GL_FUNC(PFNGLPOPDEBUGGROUPPROC, glPopDebugGroup);
 DEFINE_GL_FUNC(PFNGLFRAMETERMINATORGREMEDYPROC, glFrameTerminatorGREMEDY);
 DEFINE_GL_FUNC(PFNGLDEBUGMESSAGEINSERTPROC, glDebugMessageInsert);
 DEFINE_GL_FUNC(PFNGLOBJECTLABELPROC, glObjectLabel);
+DEFINE_GL_FUNC(PFNGLDEBUGMESSAGECALLBACKPROC, glDebugMessageCallback);
+DEFINE_GL_FUNC(PFNGLDEBUGMESSAGECONTROLPROC, glDebugMessageControl);
+
+static const char *gl_debug_severity_name(GLenum severity)
+{
+    switch (severity) {
+    case GL_DEBUG_SEVERITY_HIGH:
+        return "HIGH";
+    case GL_DEBUG_SEVERITY_MEDIUM:
+        return "MEDIUM";
+    case GL_DEBUG_SEVERITY_LOW:
+        return "LOW";
+    case GL_DEBUG_SEVERITY_NOTIFICATION:
+        return "NOTIFICATION";
+    default:
+        return "<UNKNOWN>";
+    }
+}
+
+static void APIENTRY print_gl_debug_message(GLenum source, GLenum type,
+                                            GLuint id, GLenum severity,
+                                            GLsizei length,
+                                            const GLchar *message,
+                                            const void *user_param)
+{
+    if (type != GL_DEBUG_TYPE_ERROR) {
+        return;
+    }
+
+    if (length < 0) {
+        fprintf(stderr, "GLDBG[ERROR][%s]> %s\n",
+                gl_debug_severity_name(severity), message);
+    } else {
+        fprintf(stderr, "GLDBG[ERROR][%s]> %.*s\n",
+                gl_debug_severity_name(severity), length, message);
+    }
+}
 
 void gl_debug_initialize(void)
 {
@@ -63,6 +100,8 @@ void gl_debug_initialize(void)
         LOAD_GL_FUNC(glPopDebugGroup);
         LOAD_GL_FUNC(glDebugMessageInsert);
         LOAD_GL_FUNC(glObjectLabel);
+        LOAD_GL_FUNC(glDebugMessageCallback);
+        LOAD_GL_FUNC(glDebugMessageControl);
 
 #if defined(__APPLE__)
         /* On macOS, calling glEnable(GL_DEBUG_OUTPUT) will result in error
@@ -79,6 +118,12 @@ void gl_debug_initialize(void)
 #else
         glEnable(GL_DEBUG_OUTPUT);
 #endif // defined(__APPLE__)
+
+        if (_glDebugMessageCallback && _glDebugMessageControl) {
+            _glDebugMessageCallback(print_gl_debug_message, NULL);
+            _glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR,
+                                   GL_DONT_CARE, 0, NULL, GL_TRUE);
+        }
     }
 
     if (glo_check_extension("GL_GREMEDY_frame_terminator")) {
@@ -192,6 +237,7 @@ void gl_debug_frame_terminator(void)
                 if (!capturing) {
                     if (renderdoc_trace_frames) {
                         trace_enable_events("nv2a_pgraph_*");
+                        pgraph_dump_context(g_nv2a);
                     }
                     rdoc_api->StartFrameCapture(NULL, NULL);
                     GLenum error = glGetError();
