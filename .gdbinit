@@ -6,3 +6,6 @@
 
 # Load QEMU-specific sub-commands and settings
 source scripts/qemu-gdb.py
+
+# Allow very large value sizes (e.g., the pgraph state struct)
+set max-value-size unlimited
