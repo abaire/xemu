@@ -589,6 +589,12 @@ static const VMStateDescription vmstate_nv2a = {
         VMSTATE_TIMER_V(ptimer.timer, NV2AState, 4),
         VMSTATE_BUFFER_UNSAFE(pgraph.vsh_carry_fog, NV2AState, 5,
                               sizeof(((PGRAPHState *)0)->vsh_carry_fog)),
+
+        // <DONOTSUBMIT>
+        VMSTATE_UINT32_ARRAY_V(pgraph.kelvin_state, NV2AState, 0x800, 6),
+        VMSTATE_BOOL_ARRAY_V(pgraph.kelvin_state_valid, NV2AState, 0x800, 6),
+        // </DONOTSUBMIT>
+
         VMSTATE_END_OF_LIST()
     },
 };
