@@ -22,6 +22,7 @@
 #include <math.h>
 
 #include "hw/xbox/nv2a/nv2a_int.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 #include "ui/xemu-notifications.h"
 #include "ui/xemu-settings.h"
 #include "util.h"
@@ -44,7 +45,7 @@ uint64_t pgraph_read(void *opaque, hwaddr addr, unsigned int size)
     NV2AState *d = (NV2AState *)opaque;
     PGRAPHState *pg = &d->pgraph;
 
-    qemu_mutex_lock(&pg->lock);
+    STALL_TRACE(vcpu_pgraph_lock, qemu_mutex_lock(&pg->lock));
 
     uint64_t r = 0;
     switch (addr) {
@@ -87,8 +88,8 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     nv2a_reg_log_write(NV_PGRAPH, addr, size, val);
 
-    qemu_mutex_lock(&d->pfifo.lock); // FIXME: Factor out fifo lock here
-    qemu_mutex_lock(&pg->lock);
+    STALL_TRACE(vcpu_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock)); // FIXME: Factor out fifo lock here
+    STALL_TRACE(vcpu_pgraph_lock, qemu_mutex_lock(&pg->lock));
 
     switch (addr) {
     case NV_PGRAPH_INTR:
@@ -199,10 +200,12 @@ void pgraph_context_switch(NV2AState *d, unsigned int channel_id)
 
         pg->waiting_for_context_switch = true;
         qemu_mutex_unlock(&pg->lock);
-        bql_lock();
+        STALL_TRACE(pfifo_bql_wait, bql_lock());
+        int64_t bql_held = stall_trace_begin();
         pg->pending_interrupts |= NV_PGRAPH_INTR_CONTEXT_SWITCH;
         nv2a_update_irq(d);
         bql_unlock();
+        stall_trace_end(ST_pfifo_bql_hold, bql_held);
         qemu_mutex_lock(&pg->lock);
     }
 }
@@ -870,9 +873,11 @@ DEF_METHOD(NV097, NO_OPERATION)
     pg->waiting_for_nop = true;
 
     qemu_mutex_unlock(&pg->lock);
-    bql_lock();
+    STALL_TRACE(pfifo_bql_wait, bql_lock());
+    int64_t bql_held = stall_trace_begin();
     nv2a_update_irq(d);
     bql_unlock();
+    stall_trace_end(ST_pfifo_bql_hold, bql_held);
     qemu_mutex_lock(&pg->lock);
 }
 
@@ -921,6 +926,7 @@ DEF_METHOD(NV097, FLIP_INCREMENT_WRITE)
 DEF_METHOD(NV097, FLIP_STALL)
 {
     trace_nv2a_pgraph_flip_stall();
+    stall_trace_count(ST_flip_stalls, 1);
     d->pgraph.renderer->ops.surface_update(d, false, true, true);
     d->pgraph.renderer->ops.flip_stall(d);
     nv2a_profile_flip_stall();

@@ -25,6 +25,7 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/util.h"
 #include "renderer.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 
 #include <math.h>
 
@@ -380,6 +381,7 @@ void pgraph_gl_sync(NV2AState *d)
 
     SurfaceBinding *surface = pgraph_gl_surface_get_within(d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color || !surface->width || !surface->height) {
+        stall_trace_count(ST_sync_early_return, 1);
         qemu_event_set(&d->pgraph.sync_complete);
         return;
     }
@@ -387,14 +389,15 @@ void pgraph_gl_sync(NV2AState *d)
     /* FIXME: Sanity check surface dimensions */
 
     /* Wait for queued commands to complete */
-    pgraph_gl_upload_surface_data(d, surface, !tcg_enabled());
-    gl_fence();
+    STALL_TRACE(sync_upload,
+                pgraph_gl_upload_surface_data(d, surface, !tcg_enabled()));
+    STALL_TRACE(sync_fence_render, gl_fence());
     ASSERT_NO_GL_ERROR();
 
     /* Render framebuffer in display context */
     glo_set_current(g_nv2a_context_display);
-    render_display(d, surface);
-    gl_fence();
+    STALL_TRACE(sync_render_display, render_display(d, surface));
+    STALL_TRACE(sync_fence_display, gl_fence());
     ASSERT_NO_GL_ERROR();
 
     /* Switch back to original context */
@@ -409,7 +412,7 @@ int pgraph_gl_get_framebuffer_surface(NV2AState *d)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
-    qemu_mutex_lock(&d->pfifo.lock);
+    STALL_TRACE(gui_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock));
     // FIXME: Possible race condition with pgraph, consider lock
 
     VGADisplayParams vga_display_params;
@@ -435,7 +438,7 @@ int pgraph_gl_get_framebuffer_surface(NV2AState *d)
     qatomic_set(&pg->sync_pending, true);
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
-    qemu_event_wait(&d->pgraph.sync_complete);
+    STALL_TRACE(gui_sync_wait, qemu_event_wait(&d->pgraph.sync_complete));
 
     return r->gl_display_buffer;
 }

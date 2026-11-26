@@ -20,6 +20,7 @@
  */
 
 #include "nv2a_int.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 
 /* USER - PFIFO MMIO and DMA submission area */
 uint64_t user_read(void *opaque, hwaddr addr, unsigned int size)
@@ -29,7 +30,7 @@ uint64_t user_read(void *opaque, hwaddr addr, unsigned int size)
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
 
-    qemu_mutex_lock(&d->pfifo.lock);
+    STALL_TRACE(vcpu_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock));
 
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
 
@@ -79,7 +80,7 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
 
-    qemu_mutex_lock(&d->pfifo.lock);
+    STALL_TRACE(vcpu_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock));
 
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
     if (channel_modes & (1 << channel_id)) {

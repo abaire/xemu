@@ -5,6 +5,7 @@ specific_ss.add(files(
 	'pcrtc.c',
 	'pfb.c',
 	'pfifo.c',
+	'stall_trace.c',
 	'pmc.c',
 	'pramdac.c',
 	'prmcio.c',

@@ -21,6 +21,7 @@
 
 #include <hw/xbox/nv2a/nv2a_int.h>
 #include "renderer.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 
 static void process_pending_report(NV2AState *d, QueryReport *report)
 {
@@ -41,7 +42,9 @@ static void process_pending_report(NV2AState *d, QueryReport *report)
     /* FIXME: What about clipping regions etc? */
     for (int i = 0; i < report->query_count; i++) {
         GLuint gl_query_result = 0;
-        glGetQueryObjectuiv(report->queries[i], GL_QUERY_RESULT, &gl_query_result);
+        STALL_TRACE(report_query_wait,
+                    glGetQueryObjectuiv(report->queries[i], GL_QUERY_RESULT,
+                                        &gl_query_result));
         gl_query_result /= pg->surface_scale_factor * pg->surface_scale_factor;
         r->zpass_pixel_count_result += gl_query_result;
     }

@@ -23,6 +23,7 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "debug.h"
 #include "renderer.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 
 void pgraph_gl_clear_surface(NV2AState *d, uint32_t parameter)
 {
@@ -388,6 +389,7 @@ void pgraph_gl_flush_draw(NV2AState *d)
         return;
     }
     assert(r->shader_binding);
+    stall_trace_count(ST_draws, 1);
 
     if (pg->draw_arrays_length) {
         NV2A_GL_DPRINTF(false, "Draw Arrays");

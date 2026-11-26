@@ -20,6 +20,7 @@
  */
 
 #include "nv2a_int.h"
+#include "hw/xbox/nv2a/stall_trace.h"
 
 typedef struct RAMHTEntry {
     uint32_t handle;
@@ -38,7 +39,7 @@ uint64_t pfifo_read(void *opaque, hwaddr addr, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
 
-    qemu_mutex_lock(&d->pfifo.lock);
+    STALL_TRACE(vcpu_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock));
 
     uint64_t r = 0;
     switch (addr) {
@@ -72,7 +73,7 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     nv2a_reg_log_write(NV_PFIFO, addr, size, val);
 
-    qemu_mutex_lock(&d->pfifo.lock);
+    STALL_TRACE(vcpu_pfifo_lock, qemu_mutex_lock(&d->pfifo.lock));
 
     switch (addr) {
     case NV_PFIFO_INTR_0:
@@ -190,20 +191,20 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
 
         // TODO: this is fucked
         qemu_mutex_unlock(&d->pfifo.lock);
-        qemu_mutex_lock(&d->pgraph.lock);
+        STALL_TRACE(puller_pgraph_lock, qemu_mutex_lock(&d->pgraph.lock));
 
         // Switch contexts if necessary
         if (can_fifo_access(d)) {
             pgraph_context_switch(d, entry.channel_id);
             if (!d->pgraph.waiting_for_context_switch) {
-                num_proc =
+                STALL_TRACE(puller_method, num_proc =
                     pgraph_method(d, subchannel, 0, entry.instance, parameters,
-                                  num_words_available, max_lookahead_words, inc);
+                                  num_words_available, max_lookahead_words, inc));
             }
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
-        qemu_mutex_lock(&d->pfifo.lock);
+        STALL_TRACE(puller_pfifo_relock, qemu_mutex_lock(&d->pfifo.lock));
 
     } else if (method >= 0x100) {
         // method passed to engine
@@ -225,16 +226,16 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
 
         // TODO: this is fucked
         qemu_mutex_unlock(&d->pfifo.lock);
-        qemu_mutex_lock(&d->pgraph.lock);
+        STALL_TRACE(puller_pgraph_lock, qemu_mutex_lock(&d->pgraph.lock));
 
         if (can_fifo_access(d)) {
-            num_proc =
+            STALL_TRACE(puller_method, num_proc =
                 pgraph_method(d, subchannel, method, parameter, parameters,
-                              num_words_available, max_lookahead_words, inc);
+                              num_words_available, max_lookahead_words, inc));
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
-        qemu_mutex_lock(&d->pfifo.lock);
+        STALL_TRACE(puller_pfifo_relock, qemu_mutex_lock(&d->pfifo.lock));
     } else {
         assert(!"Unrecognized pfifo puller method");
     }
@@ -458,6 +459,7 @@ void *pfifo_thread(void *arg)
     NV2AState *d = (NV2AState *)arg;
 
     pgraph_init_thread(d);
+    stall_trace_init();
 
     rcu_register_thread();
 
@@ -465,19 +467,20 @@ void *pfifo_thread(void *arg)
     while (true) {
         d->pfifo.fifo_kick = false;
 
-        pgraph_process_pending(d);
+        STALL_TRACE(pfifo_process_pending, pgraph_process_pending(d));
 
         if (!d->pfifo.halt) {
-            pfifo_run_pusher(d);
+            STALL_TRACE(pfifo_pusher, pfifo_run_pusher(d));
         }
 
-        pgraph_process_pending_reports(d);
+        STALL_TRACE(pfifo_reports, pgraph_process_pending_reports(d));
 
         if (!d->pfifo.fifo_kick) {
             qemu_cond_broadcast(&d->pfifo.fifo_idle_cond);
 
             // Both the pusher and puller are waiting for some action
-            qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+            STALL_TRACE(pfifo_idle,
+                        qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock));
         }
 
         if (d->exiting) {
