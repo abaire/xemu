@@ -1418,7 +1418,7 @@ static void populate_surface_binding_target(NV2AState *d, bool color,
     populate_surface_binding_target_sized(d, color, width, height, target);
 }
 
-static void update_surface_part(NV2AState *d, bool upload, bool color)
+static void update_surface_part(NV2AState *d, bool color, bool color_write)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1429,6 +1429,20 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 
     Surface *pg_surface = color ? &pg->surface_color : &pg->surface_zeta;
 
+    if (!color && color_write && r->color_binding &&
+        target.vram_addr == r->color_binding->vram_addr) {
+        // Hardware behavior is undefined when the color and zeta surfaces
+        // coincide and both are written. For simplicity, the color surface is
+        // preferred and zeta is unbound. The zeta buffer_dirty flag is set so
+        // zeta will be rebound if the color surface moves or color writes are
+        // disabled.
+        unbind_surface(d, false);
+        pg_surface->buffer_dirty = true;
+        pg_surface->draw_dirty = false;
+        pg_surface->write_enabled_cache = false;
+        return;
+    }
+
     bool mem_dirty = !tcg_enabled() && memory_region_test_and_clear_dirty(
                                            d->vram, target.vram_addr,
                                            target.size, DIRTY_MEMORY_NV2A);
@@ -1436,8 +1450,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
     SurfaceBinding *current_binding = color ? r->color_binding
                                             : r->zeta_binding;
 
-    if (!current_binding ||
-        (upload && (pg_surface->buffer_dirty || mem_dirty))) {
+    if (!current_binding || pg_surface->buffer_dirty || mem_dirty) {
         // FIXME: We don't need to be so aggressive flushing the command list
         // pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE);
         pgraph_vk_ensure_not_in_render_pass(pg);
@@ -1445,15 +1458,12 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
         unbind_surface(d, color);
 
         SurfaceBinding *surface = pgraph_vk_surface_get(d, target.vram_addr);
-        if (surface != NULL) {
-            // FIXME: Support same color/zeta surface target? In the mean time,
-            // if the surface we just found is currently bound, just unbind it.
-            SurfaceBinding *other = (color ? r->zeta_binding
-                                           : r->color_binding);
-            if (surface == other) {
-                NV2A_UNIMPLEMENTED("Same color & zeta surface offset");
-                unbind_surface(d, !color);
-            }
+        if (surface != NULL &&
+            surface == (color ? r->zeta_binding : r->color_binding)) {
+            unbind_surface(d, !color);
+            Surface *other_surface =
+                color ? &pg->surface_zeta : &pg->surface_color;
+            other_surface->buffer_dirty = true;
         }
 
         trace_nv2a_pgraph_surface_target(
@@ -1583,17 +1593,23 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
         bind_surface(r, surface);
         pg_surface->buffer_dirty = false;
     }
+}
 
-    if (!upload && pg_surface->draw_dirty) {
-        if (!tcg_enabled()) {
-            // FIXME: Cannot monitor for reads/writes; flush now
-            download_surface(d, color ? r->color_binding : r->zeta_binding,
-                             true);
-        }
+static void download_surface_part(NV2AState *d, bool color)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
 
-        pg_surface->write_enabled_cache = false;
-        pg_surface->draw_dirty = false;
+    Surface *pg_surface = color ? &pg->surface_color : &pg->surface_zeta;
+    SurfaceBinding *binding = color ? r->color_binding : r->zeta_binding;
+
+    if (!tcg_enabled() && binding) {
+        // FIXME: Cannot monitor for reads/writes; flush now
+        download_surface(d, binding, true);
     }
+
+    pg_surface->write_enabled_cache = false;
+    pg_surface->draw_dirty = false;
 }
 
 // FIXME: Move to common?
@@ -1633,16 +1649,16 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
         }
 
         if (zeta_write) {
-            update_surface_part(d, true, false);
+            update_surface_part(d, false, color_write);
         }
     } else {
         if ((color_write || pg->surface_color.write_enabled_cache)
             && pg->surface_color.draw_dirty) {
-            update_surface_part(d, false, true);
+            download_surface_part(d, true);
         }
         if ((zeta_write || pg->surface_zeta.write_enabled_cache)
             && pg->surface_zeta.draw_dirty) {
-            update_surface_part(d, false, false);
+            download_surface_part(d, false);
         }
     }
 
